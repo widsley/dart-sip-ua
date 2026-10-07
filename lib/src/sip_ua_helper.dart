@@ -96,7 +96,7 @@ class SIPUAHelper extends EventManager {
 
   Future<bool> call(
     String target, {
-    required String sequenceId,
+    String? sequenceId,
     bool voiceOnly = false,
     MediaStream? mediaStream,
     List<String>? headers,
@@ -104,8 +104,11 @@ class SIPUAHelper extends EventManager {
   }) async {
     if (_ua != null && _ua!.isConnected()) {
       Map<String, dynamic> options = buildCallOptions(voiceOnly);
-      // for Comdesk
-      options['SEQUENCE_ID'] = sequenceId;
+      // for Comdesk: only the legacy stage sets it; without it the INVITE
+      // carries no MESH_HEADER_* (CMR-1131).
+      if (sequenceId != null) {
+        options['SEQUENCE_ID'] = sequenceId;
+      }
 
       if (customOptions != null) {
         options = MapHelper.merge(options, customOptions);

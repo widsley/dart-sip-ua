@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:collection/collection.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:sdp_transform/sdp_transform.dart' as sdp_transform;
 
 import '../sip_ua.dart';
+import 'comdesk_headers.dart';
 import 'constants.dart' as DartSIP_C;
 import 'constants.dart';
 import 'dialog.dart';
@@ -55,7 +55,6 @@ const List<String> VFORM_USER_CALL_HEADER_KEYS = <String>[
 ];
 
 const String EVENT_HEAD = 'MESH_EVENT_';
-const String EXTRA_HEADERS_HEAD = 'MESH_HEADER_';
 
 // for Comdesk
 enum WEBHOOK_EVENT { VFORM_USER_CALL_START }
@@ -393,32 +392,9 @@ class RTCSession extends EventManager implements Owner {
       extraHeaders.add('Session-Expires: ${_sessionTimers.defaultExpires}');
     }
 
-    // for Comdesk
-    Map<String, dynamic> comdeskExtraHeaders = <String, dynamic>{};
-    comdeskExtraHeaders['CALLER_CHANNEL'] = options['CALLER_CHANNEL'];
-    comdeskExtraHeaders['VARIABLES_KEY'] = options['VARIABLES_KEY'];
-    comdeskExtraHeaders['EVENT_NUMBER'] = options['EVENT_NUMBER'];
-    comdeskExtraHeaders['SEQUENCE_ID'] = options['SEQUENCE_ID'];
-    comdeskExtraHeaders['CIRCUIT_NUMBER'] = '';
-    comdeskExtraHeaders['CIRCUIT_TITLE'] = '';
-    comdeskExtraHeaders['GROUP_NAME'] = '';
-    comdeskExtraHeaders['GROUP_NUMBER'] = '';
-    comdeskExtraHeaders['QUEUE_LOCAL_CHANEL'] = '';
-
-    final String headerKeysKey = '${EXTRA_HEADERS_HEAD}keys';
-    List<String> keysArr = <String>[];
-    keysArr.add(headerKeysKey);
-    comdeskExtraHeaders.forEach((String key, dynamic value) {
-      String headerKey = '$EXTRA_HEADERS_HEAD$key';
-      keysArr.add(headerKey);
-      if (value.runtimeType is List<dynamic>) {
-        List<dynamic>? values = value as List<dynamic>?;
-        extraHeaders.add('$headerKey : ${jsonEncode(values)}');
-      } else {
-        extraHeaders.add('$headerKey : $value');
-      }
-    });
-    extraHeaders.add('$headerKeysKey : ${jsonEncode(keysArr)}');
+    // for Comdesk: MESH_HEADER_* only when the caller set a sequence id
+    // (legacy stage). The Uninote stage sends none (CMR-1131).
+    extraHeaders.addAll(outgoingComdeskHeaderLines(options));
 
     _request =
         InitialOutgoingInviteRequest(target, _ua, requestParams, extraHeaders);
@@ -549,31 +525,12 @@ class RTCSession extends EventManager implements Owner {
     }
 
     // for Comdesk
-    Map<String, dynamic> comdeskExtraHeaders = <String, dynamic>{};
-    comdeskExtraHeaders['CALLER_CHANNEL'] = callerChannel;
-    comdeskExtraHeaders['VARIABLES_KEY'] = variablesKey;
-    comdeskExtraHeaders['EVENT_NUMBER'] = eventNumber;
-    comdeskExtraHeaders['SEQUENCE_ID'] = sequenceId;
-    comdeskExtraHeaders['CIRCUIT_NUMBER'] = '';
-    comdeskExtraHeaders['CIRCUIT_TITLE'] = '';
-    comdeskExtraHeaders['GROUP_NAME'] = '';
-    comdeskExtraHeaders['GROUP_NUMBER'] = '';
-    comdeskExtraHeaders['QUEUE_LOCAL_CHANEL'] = '';
-
-    final String headerKeysKey = '${EXTRA_HEADERS_HEAD}keys';
-    List<String> keysArr = <String>[];
-    keysArr.add(headerKeysKey);
-    comdeskExtraHeaders.forEach((String key, dynamic value) {
-      String headerKey = '$EXTRA_HEADERS_HEAD$key';
-      keysArr.add(headerKey);
-      if (value.runtimeType is List<dynamic>) {
-        List<dynamic>? values = value as List<dynamic>?;
-        extraHeaders.add('$headerKey : ${jsonEncode(values)}');
-      } else {
-        extraHeaders.add('$headerKey : $value');
-      }
-    });
-    extraHeaders.add('$headerKeysKey : ${jsonEncode(keysArr)}');
+    extraHeaders.addAll(comdeskHeaderLines(
+      callerChannel: callerChannel,
+      variablesKey: variablesKey,
+      eventNumber: eventNumber,
+      sequenceId: sequenceId,
+    ));
 
     // for Comdesk
     // _request =
