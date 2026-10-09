@@ -448,7 +448,7 @@ class RTCSession extends EventManager implements Owner {
     _rtcAnswerConstraints =
         options['rtcAnswerConstraints'] ?? <String, dynamic>{};
     data = options['data'] ?? data;
-    data?['video'] = !(options['mediaConstraints']['video'] == false);
+    data?['video'] = !(mediaConstraints['video'] == false);
 
     // Check target.
     if (target == null) {
