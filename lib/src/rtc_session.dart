@@ -1869,7 +1869,8 @@ class RTCSession extends EventManager implements Owner {
     if (_audioInterrupted == interrupted) {
       return;
     }
-    logger.i('COM-130: setAudioInterrupted=$interrupted (localHold=$_localHold)');
+    logger
+        .i('COM-130: setAudioInterrupted=$interrupted (localHold=$_localHold)');
     _audioInterrupted = interrupted;
     if (interrupted) {
       return;
@@ -1895,9 +1896,9 @@ class RTCSession extends EventManager implements Owner {
       _onunhold(Originator.local);
     }
     if (decision.iceRestart) {
-      logger.i(
-          'COM-130: interruption ended - resume (unhold=${decision.unhold}, '
-          'ice=$ice) via single ICE-restart re-INVITE.');
+      logger
+          .i('COM-130: interruption ended - resume (unhold=${decision.unhold}, '
+              'ice=$ice) via single ICE-restart re-INVITE.');
       _iceDisconnectTimer?.cancel();
       _iceDisconnectTimer = null;
       _isAttemptingIceRestart = true;
@@ -1923,9 +1924,9 @@ class RTCSession extends EventManager implements Owner {
         // media is recovered via ICE restart when the interruption ends
         // (setAudioInterrupted(false)). Decision lives in com130.dart.
         if (!shouldTeardownOnIceFailed(audioInterrupted: _audioInterrupted)) {
-          logger.w(
-              'COM-130: ICE Failed during audio interruption - suppressing '
-              'teardown, will attempt ICE restart on resume.');
+          logger
+              .w('COM-130: ICE Failed during audio interruption - suppressing '
+                  'teardown, will attempt ICE restart on resume.');
           return;
         }
         logger.e('ICE Connection State Failed.');

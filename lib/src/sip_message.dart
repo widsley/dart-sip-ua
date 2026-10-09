@@ -348,8 +348,7 @@ class InitialBridgeInviteRequest extends OutgoingRequest {
 
   @override
   InitialBridgeInviteRequest clone() {
-    InitialBridgeInviteRequest request =
-        InitialBridgeInviteRequest(ruri, ua);
+    InitialBridgeInviteRequest request = InitialBridgeInviteRequest(ruri, ua);
 
     headers.forEach((String? name, dynamic value) {
       request.headers[name] = List<dynamic>.from(headers[name]);

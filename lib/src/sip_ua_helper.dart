@@ -666,8 +666,8 @@ class Call {
   /// session. Suppresses the immediate teardown on ICE Failed during the
   /// interruption and recovers the media when it ends.
   void setAudioInterrupted(bool interrupted) {
-    assert(
-        _session != null, 'ERROR(setAudioInterrupted): rtc session is invalid!');
+    assert(_session != null,
+        'ERROR(setAudioInterrupted): rtc session is invalid!');
     _session.setAudioInterrupted(interrupted);
   }
 

@@ -590,7 +590,8 @@ class UA extends EventManager {
     // reaches this client. Pick the binding whose user part matches our own
     // contact URI, falling back to the first entry.
     dynamic contact;
-    final String? ownUser = _contact?.uri?.user ?? _configuration.contact_uri?.user;
+    final String? ownUser =
+        _contact?.uri?.user ?? _configuration.contact_uri?.user;
     final dynamic contacts = response.headers?['Contact'];
     if (contacts is List && contacts.isNotEmpty) {
       // 判別に使えるのは user 部だけである（実測 2026-08-14、本番 PBX）。
