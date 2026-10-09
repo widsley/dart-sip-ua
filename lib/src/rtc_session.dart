@@ -5,6 +5,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:sdp_transform/sdp_transform.dart' as sdp_transform;
 
 import '../sip_ua.dart';
+import 'comdesk_headers.dart';
 import 'constants.dart' as DartSIP_C;
 import 'constants.dart';
 import 'dialog.dart';
@@ -24,6 +25,51 @@ import 'timers.dart';
 import 'transactions/transaction_base.dart';
 import 'ua.dart';
 import 'utils.dart' as utils;
+
+// for Comdesk
+const List<String> BASIC_HEADER_KEYS = <String>[
+  'CALLER_CHANNEL',
+  'VARIABLES_KEY',
+  'EVENT_NUMBER',
+  'SEQUENCE_ID',
+  'CIRCUIT_NUMBER',
+  'CIRCUIT_TITLE',
+  'GROUP_NAME',
+  'GROUP_NUMBER',
+  'QUEUE_LOCAL_CHANEL',
+];
+
+// for Comdesk
+const List<String> VFORM_USER_CALL_HEADER_KEYS = <String>[
+  'TARGET_INFO',
+  'MANAGER_KEY',
+  'CIRCUIT_KEY',
+  'CIRCUIT_NAME',
+  'USER_KEY',
+  'USER_NAME',
+  'USER_NUMBER',
+  'NUMBER_FOR_YOU',
+  'RECORD_FILE_NAME',
+  'URLS',
+  'DIAL_TIMEOUT_FOR_YOU',
+];
+
+const String EVENT_HEAD = 'MESH_EVENT_';
+
+// for Comdesk
+enum WEBHOOK_EVENT { VFORM_USER_CALL_START }
+
+extension WEBHOOK_EVENT_EXT on WEBHOOK_EVENT {
+  String get value {
+    switch (this) {
+      case WEBHOOK_EVENT.VFORM_USER_CALL_START:
+        return '331';
+    }
+  }
+}
+
+// for Comdesk
+const bool isComdesk = true;
 
 enum RtcSessionState {
   none, // STATUS_NULL
@@ -113,6 +159,9 @@ class RTCSession extends EventManager implements Owner {
   Map<String, dynamic>? _rtcOfferConstraints;
   Map<String, dynamic>? _rtcAnswerConstraints;
 
+  // for Comdesk
+  Map<String, dynamic>? _mediaConstraints;
+
   // Local MediaStream.
   MediaStream? _localMediaStream;
   bool _localMediaStreamLocallyGenerated = false;
@@ -122,6 +171,11 @@ class RTCSession extends EventManager implements Owner {
 
   Timer? _iceDisconnectTimer;
   bool _isAttemptingIceRestart = false;
+
+  // COM-130: true while the app's audio is seized by the OS (e.g. a native
+  // cellular call). An ICE Failed during this window is treated as transient
+  // and its immediate teardown is suppressed.
+  bool _audioInterrupted = false;
 
   // SIP Timers.
   final SIPTimers _timers = SIPTimers();
@@ -338,8 +392,151 @@ class RTCSession extends EventManager implements Owner {
       extraHeaders.add('Session-Expires: ${_sessionTimers.defaultExpires}');
     }
 
+    // for Comdesk: MESH_HEADER_* only when the caller set a sequence id
+    // (legacy stage). The Uninote stage sends none (CMR-1131).
+    extraHeaders.addAll(outgoingComdeskHeaderLines(options));
+
     _request =
         InitialOutgoingInviteRequest(target, _ua, requestParams, extraHeaders);
+
+    _id = _request.call_id + _from_tag;
+
+    // Create a RTCPeerConnection instance.
+    await _createRTCConnection(pcConfig, rtcConstraints);
+
+    // Set internal properties.
+    _direction = Direction.outgoing;
+    _local_identity = _request.from;
+    _remote_identity = _request.to;
+
+    // User explicitly provided a newRTCSession callback for this session.
+    if (initCallback != null) {
+      initCallback(this);
+    }
+
+    _newRTCSession(Originator.local, _request);
+    await _sendInitialRequest(
+        pcConfig, mediaConstraints, rtcOfferConstraints, mediaStream);
+  }
+
+  // for Comdesk
+  void connectBridge(dynamic target, dynamic sequenceId, dynamic callerChannel,
+      dynamic variablesKey, dynamic eventNumber,
+      [Map<String, dynamic>? options,
+      InitSuccessCallback? initCallback]) async {
+    logger.d('connectBridge()');
+
+    options = options ?? <String, dynamic>{};
+    dynamic originalTarget = target;
+    EventManager eventHandlers = options['eventHandlers'] ?? EventManager();
+    List<dynamic> extraHeaders = utils.cloneArray(options['extraHeaders']);
+    extraHeaders.add('SEQUENCE_ID: $sequenceId');
+    extraHeaders.add('CALLER_CHANNEL: $callerChannel');
+    extraHeaders.add('VARIABLES_KEY: $variablesKey');
+    extraHeaders.add('EVENT_NUMBER: $eventNumber');
+
+    Map<String, dynamic> mediaConstraints = options['mediaConstraints'] ??
+        <String, dynamic>{'audio': true, 'video': true};
+    MediaStream? mediaStream = options['mediaStream'];
+    Map<String, dynamic> pcConfig =
+        options['pcConfig'] ?? <String, dynamic>{'iceServers': <dynamic>[]};
+    Map<String, dynamic> rtcConstraints =
+        options['rtcConstraints'] ?? <String, dynamic>{};
+    Map<String, dynamic> rtcOfferConstraints =
+        options['rtcOfferConstraints'] ?? <String, dynamic>{};
+    _rtcOfferConstraints = rtcOfferConstraints;
+    _rtcAnswerConstraints =
+        options['rtcAnswerConstraints'] ?? <String, dynamic>{};
+    data = options['data'] ?? data;
+    data?['video'] = !(mediaConstraints['video'] == false);
+
+    // Check target.
+    if (target == null) {
+      throw Exceptions.TypeError('Not enough arguments');
+    }
+
+    // Check Session Status.
+    if (_state != RtcSessionState.none) {
+      throw Exceptions.InvalidStateError(_state.name);
+    }
+
+    // Check WebRTC support.
+    // TODO(cloudwebrtc): change support for flutter-webrtc
+    //if (RTCPeerConnection == null)
+    //{
+    //  throw Exceptions.NotSupportedError('WebRTC not supported');
+    //}
+
+    // Check target validity.
+    target = _ua.normalizeTarget(target);
+    if (target == null) {
+      throw Exceptions.TypeError('Invalid target: $originalTarget');
+    }
+
+    // Session Timers.
+    if (_sessionTimers.enabled) {
+      if (utils.isDecimal(options['sessionTimersExpires'])) {
+        if (options['sessionTimersExpires'] >= DartSIP_C.MIN_SESSION_EXPIRES) {
+          _sessionTimers.defaultExpires = options['sessionTimersExpires'];
+        } else {
+          _sessionTimers.defaultExpires = DartSIP_C.SESSION_EXPIRES;
+        }
+      }
+    }
+
+    // Set event handlers.
+    addAllEventHandlers(eventHandlers);
+
+    // Session parameter initialization.
+    _from_tag = utils.newTag();
+
+    // Set anonymous property.
+    bool anonymous = options['anonymous'] ?? false;
+    Map<String, dynamic> requestParams = <String, dynamic>{
+      'from_tag': _from_tag,
+      'to_display_name': options['to_display_name'] ?? '',
+    };
+    _ua.contact!.anonymous = anonymous;
+    _ua.contact!.outbound = true;
+    _contact = _ua.contact.toString();
+
+    bool isFromUriOptionPresent = options['from_uri'] != null;
+
+    //set from_uri and from_display_name if present
+    if (isFromUriOptionPresent) {
+      requestParams['from_display_name'] = options['from_display_name'] ?? '';
+      requestParams['from_uri'] = URI.parse(options['from_uri']);
+      extraHeaders
+          .add('P-Preferred-Identity: ${_ua.configuration.uri.toString()}');
+    }
+
+    if (anonymous) {
+      requestParams['from_display_name'] = 'Anonymous';
+      requestParams['from_uri'] = URI('sip', 'anonymous', 'anonymous.invalid');
+      extraHeaders
+          .add('P-Preferred-Identity: ${_ua.configuration.uri.toString()}');
+      extraHeaders.add('Privacy: id');
+    }
+
+    extraHeaders.add('Contact: $_contact');
+    extraHeaders.add('Content-Type: application/sdp');
+    if (_sessionTimers.enabled) {
+      extraHeaders.add('Session-Expires: ${_sessionTimers.defaultExpires}');
+    }
+
+    // for Comdesk
+    extraHeaders.addAll(comdeskHeaderLines(
+      callerChannel: callerChannel,
+      variablesKey: variablesKey,
+      eventNumber: eventNumber,
+      sequenceId: sequenceId,
+    ));
+
+    // for Comdesk
+    // _request =
+    //     InitialOutgoingInviteRequest(target, _ua, requestParams, extraHeaders);
+    _request =
+        InitialBridgeInviteRequest(target, _ua, requestParams, extraHeaders);
 
     _id = _request.call_id + _from_tag;
 
@@ -1096,12 +1293,14 @@ class RTCSession extends EventManager implements Owner {
       _sendUpdate(<String, dynamic>{
         'sdpOffer': true,
         'eventHandlers': handlers,
-        'extraHeaders': options['extraHeaders']
+        'extraHeaders': options['extraHeaders'],
+        'mediaConstraints': _mediaConstraints,
       });
     } else {
       _sendReinvite(<String, dynamic>{
         'eventHandlers': handlers,
-        'extraHeaders': options['extraHeaders']
+        'extraHeaders': options['extraHeaders'],
+        'mediaConstraints': _mediaConstraints,
       });
     }
 
@@ -1148,12 +1347,14 @@ class RTCSession extends EventManager implements Owner {
       _sendUpdate(<String, dynamic>{
         'sdpOffer': true,
         'eventHandlers': handlers,
-        'extraHeaders': options['extraHeaders']
+        'extraHeaders': options['extraHeaders'],
+        'mediaConstraints': _mediaConstraints,
       });
     } else {
       _sendReinvite(<String, dynamic>{
         'eventHandlers': handlers,
-        'extraHeaders': options['extraHeaders']
+        'extraHeaders': options['extraHeaders'],
+        'mediaConstraints': _mediaConstraints,
       });
     }
 
@@ -1558,6 +1759,7 @@ class RTCSession extends EventManager implements Owner {
       await _localMediaStream!.dispose();
       _localMediaStream = null;
     }
+    _mediaConstraints = null;
 
     // Terminate signaling.
 
@@ -1649,7 +1851,59 @@ class RTCSession extends EventManager implements Owner {
           'optional': <dynamic>[],
         };
     offerConstraints['mandatory']['IceRestart'] = true;
-    renegotiate(options: offerConstraints);
+    final bool started = renegotiate(options: offerConstraints);
+    logger.i('COM-130: ICE restart renegotiate started=$started');
+    if (!started) {
+      // The re-offer could not be sent yet (pending transaction / not
+      // established). Reset the flag so a later recovery attempt is not
+      // permanently blocked.
+      _isAttemptingIceRestart = false;
+    }
+  }
+
+  /// COM-130: called from the app layer (audio-interruption detection).
+  /// While interrupted (true), the immediate teardown on ICE Failed is
+  /// suppressed; when the interruption ends (false), if ICE is failed/
+  /// disconnected an ICE restart is attempted to recover the media.
+  void setAudioInterrupted(bool interrupted) {
+    if (_audioInterrupted == interrupted) {
+      return;
+    }
+    logger
+        .i('COM-130: setAudioInterrupted=$interrupted (localHold=$_localHold)');
+    _audioInterrupted = interrupted;
+    if (interrupted) {
+      return;
+    }
+    // Decision is in com130.dart (resumeAfterInterruptionDecision) — the single
+    // source of truth that unit tests exercise directly.
+    final RTCIceConnectionState? ice = _connection?.iceConnectionState;
+    final ResumeAfterInterruption decision = resumeAfterInterruptionDecision(
+      terminated: _state == RtcSessionState.terminated ||
+          _state == RtcSessionState.canceled,
+      localHold: _localHold,
+      iceFailedOrDisconnected:
+          ice == RTCIceConnectionState.RTCIceConnectionStateFailed ||
+              ice == RTCIceConnectionState.RTCIceConnectionStateDisconnected,
+      isAttemptingIceRestart: _isAttemptingIceRestart,
+    );
+    // If we auto-held for COM-130, release the hold (stops PBX MoH, restores
+    // two-way audio). The un-hold + ICE restart are combined into a single
+    // re-INVITE (offer is sendrecv since _localHold becomes false) to avoid two
+    // overlapping re-INVITE transactions.
+    if (decision.unhold) {
+      _localHold = false;
+      _onunhold(Originator.local);
+    }
+    if (decision.iceRestart) {
+      logger
+          .i('COM-130: interruption ended - resume (unhold=${decision.unhold}, '
+              'ice=$ice) via single ICE-restart re-INVITE.');
+      _iceDisconnectTimer?.cancel();
+      _iceDisconnectTimer = null;
+      _isAttemptingIceRestart = true;
+      _iceRestart();
+    }
   }
 
   Future<void> _createRTCConnection(Map<String, dynamic> pcConfig,
@@ -1665,6 +1919,16 @@ class RTCSession extends EventManager implements Owner {
       }
 
       if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        // COM-130: an ICE Failed during an audio interruption (e.g. native
+        // call) is treated as transient; suppress the immediate teardown. The
+        // media is recovered via ICE restart when the interruption ends
+        // (setAudioInterrupted(false)). Decision lives in com130.dart.
+        if (!shouldTeardownOnIceFailed(audioInterrupted: _audioInterrupted)) {
+          logger
+              .w('COM-130: ICE Failed during audio interruption - suppressing '
+                  'teardown, will attempt ICE restart on resume.');
+          return;
+        }
         logger.e('ICE Connection State Failed.');
         _iceDisconnectTimer?.cancel();
         terminate(<String, dynamic>{
@@ -2436,6 +2700,9 @@ class RTCSession extends EventManager implements Owner {
       sdpSemantics = pcConfig['sdpSemantics'];
     }
 
+    // for Comdesk
+    _mediaConstraints = mediaConstraints;
+
     // This Promise is resolved within the next iteration, so the app has now
     // a chance to set events such as 'peerconnection' and 'connecting'.
     MediaStream? stream;
@@ -2833,47 +3100,85 @@ class RTCSession extends EventManager implements Owner {
     dynamic sdpSemantics =
         options['pcConfig']?['sdpSemantics'] ?? 'unified-plan';
 
-    try {
-      MediaStream localStream =
-          await navigator.mediaDevices.getUserMedia(mediaConstraints);
-      _localMediaStreamLocallyGenerated = true;
-
-      switch (sdpSemantics) {
-        case 'unified-plan':
-          localStream.getTracks().forEach((MediaStreamTrack track) {
-            if (track.kind == 'video')
-              _connection!.addTrack(track, localStream);
-            _localMediaStream?.addTrack(track);
-          });
-          break;
-        case 'plan-b':
-          _connection!.addStream(localStream);
-          break;
-        default:
-          logger.e('Unkown sdp semantics $sdpSemantics');
-          throw Exceptions.NotReadyError('Unkown sdp semantics $sdpSemantics');
+    if (isComdesk) {
+      MediaStream? mediaStream = _localMediaStream;
+      // This Promise is resolved within the next iteration, so the app has now
+      // a chance to set events such as 'peerconnection' and 'connecting'.
+      MediaStream? stream;
+      // A stream is given, var the app set events such as 'peerconnection' and 'connecting'.
+      if (mediaStream != null) {
+        stream = mediaStream;
+        emit(EventStream(
+            session: this, originator: Originator.local, stream: stream));
+      } // Request for user media access.
+      else if (mediaConstraints['audio'] != null ||
+          mediaConstraints['video'] != null) {
+        _localMediaStreamLocallyGenerated = true;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+          emit(EventStream(
+              session: this, originator: Originator.local, stream: stream));
+        } catch (error) {
+          if (_state == RtcSessionState.terminated) {
+            throw Exceptions.InvalidStateError('terminated');
+          }
+          _failed(
+              Originator.local,
+              null,
+              null,
+              null,
+              500,
+              DartSIP_C.CausesType.USER_DENIED_MEDIA_ACCESS,
+              'User Denied Media Access');
+          logger.e('emit "getusermediafailed" [error:${error.toString()}]');
+          emit(EventGetUserMediaFailed(exception: error));
+          rethrow;
+        }
       }
+    } else {
+      try {
+        MediaStream localStream =
+            await navigator.mediaDevices.getUserMedia(mediaConstraints);
+        _localMediaStreamLocallyGenerated = true;
 
-      emit(EventStream(
-          session: this,
-          originator: Originator.local,
-          stream: _localMediaStream));
-    } catch (error) {
-      if (_state == RtcSessionState.terminated) {
-        throw Exceptions.InvalidStateError('terminated');
+        switch (sdpSemantics) {
+          case 'unified-plan':
+            localStream.getTracks().forEach((MediaStreamTrack track) {
+              if (track.kind == 'video')
+                _connection!.addTrack(track, localStream);
+              _localMediaStream?.addTrack(track);
+            });
+            break;
+          case 'plan-b':
+            _connection!.addStream(localStream);
+            break;
+          default:
+            logger.e('Unkown sdp semantics $sdpSemantics');
+            throw Exceptions.NotReadyError(
+                'Unkown sdp semantics $sdpSemantics');
+        }
+
+        emit(EventStream(
+            session: this,
+            originator: Originator.local,
+            stream: _localMediaStream));
+      } catch (error) {
+        if (_state == RtcSessionState.terminated) {
+          throw Exceptions.InvalidStateError('terminated');
+        }
+        request.reply(480);
+        _failed(
+            Originator.local,
+            null,
+            null,
+            null,
+            480,
+            DartSIP_C.CausesType.USER_DENIED_MEDIA_ACCESS,
+            'User Denied Media Access');
+        logger.e('emit "getusermediafailed" [error:${error.toString()}]');
+        emit(EventGetUserMediaFailed(exception: error));
+        throw Exceptions.InvalidStateError('getUserMedia() failed');
       }
-      request.reply(480);
-      _failed(
-          Originator.local,
-          null,
-          null,
-          null,
-          480,
-          DartSIP_C.CausesType.USER_DENIED_MEDIA_ACCESS,
-          'User Denied Media Access');
-      logger.e('emit "getusermediafailed" [error:${error.toString()}]');
-      emit(EventGetUserMediaFailed(exception: error));
-      throw Exceptions.InvalidStateError('getUserMedia() failed');
     }
 
     bool succeeded = false;

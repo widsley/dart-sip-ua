@@ -190,8 +190,13 @@ class Registrator {
             contacts.add(item['parsed']);
           });
           // Get the Contact pointing to us and update the expires value accordingly.
+          // COM-283: orElse が無いと一致するバインディングが無い場合に
+          // StateError を投げ、直後の null チェックに到達しない。registrar が
+          // user 部を書き換える構成では実際に起こり得るため、null を返して
+          // 既存の「response ignored」経路に載せる。
           dynamic contact = contacts.firstWhere(
-              (dynamic element) => element.uri.user == _ua.contact!.uri!.user);
+              (dynamic element) => element.uri.user == _ua.contact!.uri!.user,
+              orElse: () => null);
 
           if (contact == null) {
             logger.d('no Contact header pointing to us, response ignored');

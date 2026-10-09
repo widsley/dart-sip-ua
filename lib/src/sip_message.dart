@@ -335,6 +335,38 @@ class InitialOutgoingInviteRequest extends OutgoingRequest {
   }
 }
 
+class InitialBridgeInviteRequest extends OutgoingRequest {
+  InitialBridgeInviteRequest(URI? ruri, UA ua,
+      [Map<String, dynamic>? params, List<dynamic>? extraHeaders, String? body])
+      : super(SipMethod.INVITE, ruri, ua, params, extraHeaders, body) {
+    transaction = null;
+  }
+
+  void cancel(String? reason) {
+    transaction.cancel(reason);
+  }
+
+  @override
+  InitialBridgeInviteRequest clone() {
+    InitialBridgeInviteRequest request = InitialBridgeInviteRequest(ruri, ua);
+
+    headers.forEach((String? name, dynamic value) {
+      request.headers[name] = List<dynamic>.from(headers[name]);
+    });
+
+    request.body = body;
+    request.extraHeaders = utils.cloneArray(extraHeaders);
+    request.to = to;
+    request.from = from;
+    request.call_id = call_id;
+    request.cseq = cseq;
+
+    request.transaction = transaction;
+
+    return request;
+  }
+}
+
 class IncomingMessage {
   IncomingMessage() {
     data = '';

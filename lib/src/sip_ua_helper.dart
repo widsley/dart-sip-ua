@@ -4,10 +4,9 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:logger/logger.dart';
 import 'package:sdp_transform/sdp_transform.dart' as sdp_transform;
 
-import 'package:sip_ua/src/uri.dart';
+import 'package:sip_ua/sip_ua.dart';
 import 'config.dart';
 import 'constants.dart' as DartSIP_C;
-import 'enums.dart';
 import 'event_manager/event_manager.dart';
 import 'event_manager/internal_events.dart';
 import 'event_manager/subscriber_events.dart';
@@ -17,10 +16,8 @@ import 'message.dart';
 import 'options.dart';
 import 'rtc_session.dart';
 import 'rtc_session/refer_subscriber.dart';
-import 'sip_message.dart';
 import 'stack_trace_nj.dart';
 import 'subscriber.dart';
-import 'transport_type.dart';
 import 'transports/socket_interface.dart';
 import 'transports/tcp_socket.dart';
 import 'transports/web_socket.dart';
@@ -44,6 +41,8 @@ class SIPUAHelper extends EventManager {
 
   /// Sets the logging level for the default logger. Has no effect if custom logger is supplied.
   set loggingLevel(Level loggingLevel) => Log.loggingLevel = loggingLevel;
+
+  UA? get ua => _ua;
 
   bool get registered {
     if (_ua != null) {
@@ -94,13 +93,21 @@ class SIPUAHelper extends EventManager {
     }
   }
 
-  Future<bool> call(String target,
-      {bool voiceOnly = false,
-      MediaStream? mediaStream,
-      List<String>? headers,
-      Map<String, dynamic>? customOptions}) async {
+  Future<bool> call(
+    String target, {
+    String? sequenceId,
+    bool voiceOnly = false,
+    MediaStream? mediaStream,
+    List<String>? headers,
+    Map<String, dynamic>? customOptions,
+  }) async {
     if (_ua != null && _ua!.isConnected()) {
       Map<String, dynamic> options = buildCallOptions(voiceOnly);
+      // for Comdesk: only the legacy stage sets it; without it the INVITE
+      // carries no MESH_HEADER_* (CMR-1131).
+      if (sequenceId != null) {
+        options['SEQUENCE_ID'] = sequenceId;
+      }
 
       if (customOptions != null) {
         options = MapHelper.merge(options, customOptions);
@@ -113,6 +120,40 @@ class SIPUAHelper extends EventManager {
       options['extraHeaders'] = extHeaders;
       _ua!.call(target, options);
       return true;
+    } else {
+      logger.e('Not connected, you will need to register.',
+          stackTrace: StackTraceNJ());
+    }
+    return false;
+  }
+
+  // for Comdesk
+  Future<bool> callBridge(
+    String target, {
+    required String sequenceId,
+    required String callerChannel,
+    required String variablesKey,
+    required String eventNumber,
+    bool voiceOnly = false,
+    MediaStream? mediaStream,
+    List<String>? headers,
+    Map<String, dynamic>? customOptions,
+  }) async {
+    if (_ua != null && _ua!.isConnected()) {
+      Map<String, dynamic> options = buildCallOptions(voiceOnly);
+
+      if (customOptions != null) {
+        options = MapHelper.merge(options, customOptions);
+      }
+      if (mediaStream != null) {
+        options['mediaStream'] = mediaStream;
+      }
+      List<dynamic> extHeaders = options['extraHeaders'] as List<dynamic>;
+      extHeaders.addAll(headers ?? <String>[]);
+      options['extraHeaders'] = extHeaders;
+      RTCSession session = _ua!.callBridge(target, sequenceId, callerChannel,
+          variablesKey, eventNumber, options);
+      return (session != null);
     } else {
       logger.e('Not connected, you will need to register.',
           stackTrace: StackTraceNJ());
@@ -135,7 +176,7 @@ class SIPUAHelper extends EventManager {
     call.renegotiate(options: finalOptions, useUpdate: useUpdate, done: done);
   }
 
-  Future<void> start(UaSettings uaSettings) async {
+  Future<bool> start(UaSettings uaSettings) async {
     if (_ua != null) {
       logger.w('UA instance already exist!, stopping UA and creating a one...');
       _ua!.stop();
@@ -268,9 +309,11 @@ class SIPUAHelper extends EventManager {
       });
 
       _ua!.start();
+      return true;
     } catch (e, s) {
       logger.e(e.toString(), error: e, stackTrace: s);
     }
+    return false;
   }
 
   /// Build the call options.
@@ -616,6 +659,15 @@ class Call {
   void unmute([bool audio = true, bool video = true]) {
     assert(_session != null, 'ERROR(unmute): rtc session is invalid!');
     _session.unmute(audio, video);
+  }
+
+  /// COM-130: forwards the audio-interruption state (e.g. native call) to the
+  /// session. Suppresses the immediate teardown on ICE Failed during the
+  /// interruption and recovers the media when it ends.
+  void setAudioInterrupted(bool interrupted) {
+    assert(_session != null,
+        'ERROR(setAudioInterrupted): rtc session is invalid!');
+    _session.setAudioInterrupted(interrupted);
   }
 
   void renegotiate({

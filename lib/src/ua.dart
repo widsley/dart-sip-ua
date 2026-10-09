@@ -10,6 +10,7 @@ import 'enums.dart';
 import 'event_manager/event_manager.dart';
 import 'event_manager/internal_events.dart';
 import 'exceptions.dart' as Exceptions;
+import 'grammar.dart';
 import 'logger.dart';
 import 'message.dart';
 import 'options.dart';
@@ -112,6 +113,8 @@ class UA extends EventManager {
   UAStatus _status = UAStatus.init;
   UAError? _error;
   late TransactionBag _transactions;
+  // for Comdesk
+  String? _registeredContact;
 
 // Custom UA empty object for high level use.
   final Map<String, dynamic> _data = <String, dynamic>{};
@@ -128,6 +131,9 @@ class UA extends EventManager {
   SocketTransport? get socketTransport => _socketTransport;
 
   TransactionBag get transactions => _transactions;
+
+  // for Comdesk
+  String? get registeredContact => _registeredContact;
 
   // Flag that indicates whether UA is currently stopping
   bool _stopping = false;
@@ -243,6 +249,28 @@ class UA extends EventManager {
     logger.d('call()');
     RTCSession session = RTCSession(this);
     session.connect(target, options);
+    return session;
+  }
+
+  /**
+   * Make an answar with bridge-invite.
+   *
+   * -param {String} target
+   * -param {String} sequenceId
+   * -param {String} callerChannel
+   * -param {String} variablesKey
+   * -param {String} eventNumber
+   * -param {Object} [options]
+   *
+   * -throws {TypeError}
+   *
+   */
+  RTCSession callBridge(String target, String sequenceId, String callerChannel,
+      String variablesKey, String eventNumber, Map<String, dynamic> options) {
+    logger.d('callBridge()');
+    RTCSession session = RTCSession(this);
+    session.connectBridge(
+        target, sequenceId, callerChannel, variablesKey, eventNumber, options);
     return session;
   }
 
@@ -555,6 +583,64 @@ class UA extends EventManager {
    * Registered
    */
   void registered({required dynamic response}) {
+    // COM-283: The 200 OK lists every active binding for the AOR, not just
+    // ours. Blindly taking the first entry can report another (possibly dead)
+    // registration's contact as our own; publishing that contact makes the
+    // server dial a binding we do not own, so the incoming INVITE never
+    // reaches this client. Pick the binding whose user part matches our own
+    // contact URI, falling back to the first entry.
+    dynamic contact;
+    final String? ownUser =
+        _contact?.uri?.user ?? _configuration.contact_uri?.user;
+    final dynamic contacts = response.headers?['Contact'];
+    if (contacts is List && contacts.isNotEmpty) {
+      // 判別に使えるのは user 部だけである（実測 2026-08-14、本番 PBX）。
+      //   送信した Contact: <sip:9jfs0914@8hgt7nppenrx.invalid;transport=wss>
+      //                     ;reg-id=1;+sip.instance="<urn:uuid:...>"
+      //   200 OK の Contact: <sip:9jfs0914@127.0.0.1:59350;transport=WS>
+      //                     ;expires=599
+      // registrar は host・port・transport を書き換え、+sip.instance と reg-id を
+      // 落とすため、URI 全体の一致も instance-id による判別も成立しない。
+      // 一方 user 部は保持され、これは UA インスタンスごとのランダム token
+      // （dart-sip-ua が生成）なので、同一 AOR の他バインディングとは異なる。
+      //
+      // ⚠️ 前提: contact_uri が未設定でライブラリ生成の token が使われること。
+      // アプリは settings.contact_uri に 'sip:<sipUsername>@<host>' を渡している
+      // が、Settings.contact_uri は URI 型で、config.dart の loader は String の
+      // 場合しか dst に代入しないため、現状この指定は無視されている。もし将来
+      // これが有効になると user 部が AOR 共通の SIP アカウント名になり、
+      // 判別は成立しなくなる（先頭一致に退化する）。その場合はこの実装も
+      // 見直しが必要。
+      logger.i('COM283-DIAG[register-200-contacts]: '
+          'own=${_contact?.uri} count=${contacts.length} '
+          'raw=${contacts.map((dynamic e) => e['raw']).toList()}');
+      if (ownUser != null && ownUser.isNotEmpty) {
+        for (final dynamic entry in contacts) {
+          final String? raw = entry['raw'] as String?;
+          if (raw == null) {
+            continue;
+          }
+          // 部分一致ではなく user 部の完全一致で判定する（token が別の
+          // バインディングのパラメータ内に現れた場合の誤判定を避ける）。
+          final dynamic parsed = Grammar.parse(raw, 'Contact');
+          final dynamic uri = parsed is List && parsed.isNotEmpty
+              ? parsed[0]['parsed']?.uri
+              : null;
+          if (uri?.user == ownUser) {
+            contact = raw;
+            break;
+          }
+        }
+      }
+      if (contact == null) {
+        // user 部で特定できなかった場合は従来どおり先頭を使うが、別セッションの
+        // バインディングを publish している可能性があるため記録する。
+        logger.w('COM283-DIAG[register-200-contacts]: own binding not found, '
+            'falling back to the first entry');
+        contact = contacts[0]['raw'] as String?;
+      }
+    }
+    _registeredContact = contact;
     emit(EventRegistered(
         cause: ErrorCause(
             cause: 'registered',
@@ -902,6 +988,8 @@ class UA extends EventManager {
           <dynamic, dynamic>{'transport': transport});
     }
     _contact = Contact(_configuration.contact_uri);
+    // for Comdesk
+    _registeredContact = null;
     return;
   }
 
