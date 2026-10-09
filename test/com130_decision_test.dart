@@ -3,8 +3,10 @@
 // calls (single source of truth), not a re-implementation.
 // Import the pure helper directly (not the barrel) so `dart test` on the Dart
 // VM does not pull in the flutter_webrtc-dependent parts of the library.
-import 'package:sip_ua/src/com130.dart';
+
 import 'package:test/test.dart';
+
+import 'package:sip_ua/src/com130.dart';
 
 void main() {
   group('resumeAfterInterruptionDecision', () {
