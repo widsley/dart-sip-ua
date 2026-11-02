@@ -14,6 +14,7 @@ import 'event_manager/internal_events.dart';
 import 'exceptions.dart' as Exceptions;
 import 'logger.dart';
 import 'name_addr_header.dart';
+import 'reoffer_response.dart';
 import 'request_sender.dart';
 import 'rtc_session/dtmf.dart' as RTCSession_DTMF;
 import 'rtc_session/dtmf.dart';
@@ -3003,7 +3004,7 @@ class RTCSession extends EventManager implements Owner {
       sendRequest(SipMethod.ACK);
 
       // If it is a 2XX retransmission exit now.
-      if (succeeded != null) {
+      if (isRetransmitted2xx(alreadySucceeded: succeeded)) {
         return;
       }
 
@@ -3204,7 +3205,7 @@ class RTCSession extends EventManager implements Owner {
       sendRequest(SipMethod.ACK);
 
       // If it is a 2XX retransmission exit now.
-      if (succeeded) {
+      if (isRetransmitted2xx(alreadySucceeded: succeeded)) {
         return;
       }
 
@@ -3316,7 +3317,7 @@ class RTCSession extends EventManager implements Owner {
       _handleSessionTimersInIncomingResponse(response);
 
       // If it is a 2XX retransmission exit now.
-      if (succeeded != null) {
+      if (isRetransmitted2xx(alreadySucceeded: succeeded)) {
         return;
       }
 
