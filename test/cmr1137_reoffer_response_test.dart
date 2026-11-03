@@ -47,4 +47,22 @@ void main() {
       );
     });
   });
+
+  group('UPDATE with an SDP offer', () {
+    final String source = File('lib/src/rtc_session.dart').readAsStringSync();
+
+    test('fails only when the 2xx has no SDP body, as in _sendReinvite', () {
+      final int start = source.indexOf('void _sendUpdate(');
+      expect(start, isNot(-1));
+      final String sendUpdate =
+          source.substring(start, source.indexOf('\n  }\n', start));
+      expect(
+        RegExp(r'if\s*\(\s*sdpOffer\s*\)\s*\{\s*'
+                r'if\s*\(\s*response!\.body\s*==\s*null\s*\|\|\s*'
+                r'response\.body!\.isEmpty\s*\)\s*\{\s*onFailed\(\)\s*;')
+            .hasMatch(sendUpdate),
+        isTrue,
+      );
+    });
+  });
 }

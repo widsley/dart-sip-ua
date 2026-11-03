@@ -3323,7 +3323,7 @@ class RTCSession extends EventManager implements Owner {
 
       // Must have SDP answer.
       if (sdpOffer) {
-        if (response!.body != null && response.body!.trim().isNotEmpty) {
+        if (response!.body == null || response.body!.isEmpty) {
           onFailed();
           return;
         } else if (response.getHeader('Content-Type') != 'application/sdp') {
