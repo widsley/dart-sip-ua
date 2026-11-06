@@ -12,6 +12,7 @@ import 'dialog.dart';
 import 'event_manager/event_manager.dart';
 import 'event_manager/internal_events.dart';
 import 'exceptions.dart' as Exceptions;
+import 'local_description_ready.dart';
 import 'logger.dart';
 import 'name_addr_header.dart';
 import 'reoffer_response.dart';
@@ -2043,6 +2044,8 @@ class RTCSession extends EventManager implements Owner {
 
     constraints['offerModifiers'] = null;
 
+    final bool iceRestart = isIceRestartRequested(constraints);
+
     if (type != SdpType.offer && type != SdpType.answer) {
       completer.completeError(Exceptions.TypeError(
           'createLocalDescription() | invalid type "$type"'));
@@ -2129,9 +2132,12 @@ class RTCSession extends EventManager implements Owner {
       completer.completeError(error);
     }
 
-    // Resolve right away if 'pc.iceGatheringState' is 'complete'.
-    if (_iceGatheringState ==
-        RTCIceGatheringState.RTCIceGatheringStateComplete) {
+    // Resolve right away if 'pc.iceGatheringState' is 'complete' and this is
+    // not an ICE restart (which needs the new candidates).
+    if (canUseLocalDescriptionImmediately(
+        gatheringComplete: _iceGatheringState ==
+            RTCIceGatheringState.RTCIceGatheringStateComplete,
+        iceRestart: iceRestart)) {
       _rtcReady = true;
       RTCSessionDescription? desc = await _connection!.getLocalDescription();
       logger.d('emit "sdp"');
