@@ -23,3 +23,9 @@ bool canUseLocalDescriptionImmediately({
   required bool iceRestart,
 }) =>
     gatheringComplete && !iceRestart;
+
+/// How long a local description waits for ICE gathering before it is used
+/// as it is. The 0.5 s wait is armed only by the first candidate, so a
+/// gathering that yields no candidate and never completes would otherwise
+/// leave the offer or answer pending forever.
+const Duration iceGatheringFallback = Duration(seconds: 5);
