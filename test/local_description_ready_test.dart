@@ -89,6 +89,31 @@ void main() {
           1);
     });
 
+    test('the waiting path arms one fallback timer that calls ready()', () {
+      expect(
+          RegExp(r'fallback\s*=\s*setTimeout\(\s*\(\)\s*=>\s*ready\(\)\s*,\s*'
+                  r'iceGatheringFallback\.inMilliseconds\s*\)')
+              .allMatches(source)
+              .length,
+          1);
+    });
+
+    test('the fallback timer is armed only after the right-away check', () {
+      final int check = source.indexOf('canUseLocalDescriptionImmediately(');
+      final int arm = source.indexOf('iceGatheringFallback.inMilliseconds');
+      expect(check, isNonNegative);
+      expect(arm, greaterThan(check));
+    });
+
+    test('ready() cancels the fallback timer and skips a failed description',
+        () {
+      expect(
+          RegExp(r'Future<void>\s+ready\(\)\s+async\s*\{[^}]*'
+                  r'clearTimeout\(\s*fallback\s*\)[^}]*!completer\.isCompleted')
+              .hasMatch(source),
+          isTrue);
+    });
+
     test('no other right-away check on the cached gathering state', () {
       expect(
           RegExp(r'if\s*\(\s*_iceGatheringState\s*==\s*'

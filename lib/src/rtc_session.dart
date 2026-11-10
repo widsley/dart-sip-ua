@@ -2075,6 +2075,7 @@ class RTCSession extends EventManager implements Owner {
 
     // Add 'pc.onicencandidate' event handler to resolve on last candidate.
     bool finished = false;
+    Timer? fallback;
 
     for (Future<RTCSessionDescription> Function(RTCSessionDescription) modifier
         in modifiers) {
@@ -2082,7 +2083,10 @@ class RTCSession extends EventManager implements Owner {
     }
 
     Future<void> ready() async {
-      if (!finished && _state != RtcSessionState.terminated) {
+      clearTimeout(fallback);
+      if (!finished &&
+          !completer.isCompleted &&
+          _state != RtcSessionState.terminated) {
         finished = true;
         _connection!.onIceCandidate = null;
         _connection!.onIceGatheringState = null;
@@ -2143,6 +2147,11 @@ class RTCSession extends EventManager implements Owner {
       logger.d('emit "sdp"');
       emit(EventSdp(originator: Originator.local, type: type, sdp: desc!.sdp));
       return desc;
+    }
+
+    // COM-130: backstop for a gathering that never completes (see the constant).
+    if (!completer.isCompleted) {
+      fallback = setTimeout(() => ready(), iceGatheringFallback.inMilliseconds);
     }
 
     return completer.future;
