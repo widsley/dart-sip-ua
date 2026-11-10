@@ -36,6 +36,11 @@ class SIPUATcpSocket extends SIPUASocketInterface {
   int? status;
   late TcpSocketSettings _tcpSocketSettings;
 
+  DateTime? _lastReceivedAt;
+
+  @override
+  DateTime? get lastReceivedAt => _lastReceivedAt;
+
   @override
   String get via_transport => _via_transport;
 
@@ -151,6 +156,7 @@ class SIPUATcpSocket extends SIPUASocketInterface {
    * TcpSocket Event Handlers
    */
   void _onOpen() {
+    _lastReceivedAt = DateTime.now();
     logger.d('TcpSocket $_host:$port connected');
     onconnect!();
   }
@@ -164,6 +170,7 @@ class SIPUATcpSocket extends SIPUASocketInterface {
   }
 
   void _onMessage(dynamic data) {
+    _lastReceivedAt = DateTime.now();
     logger.d('Received TcpSocket data');
     if (data != null) {
       if (data.toString().trim().isNotEmpty) {

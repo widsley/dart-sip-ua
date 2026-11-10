@@ -51,6 +51,10 @@ class SIPUAHelper extends EventManager {
     return false;
   }
 
+  /// CMR-1269: when the SIP connection last received anything (keepalives
+  /// included); null when there is no UA or no connection yet.
+  DateTime? get lastReceivedAt => _ua?.lastReceivedAt;
+
   bool get connected {
     if (_ua != null) {
       return _ua!.isConnected();

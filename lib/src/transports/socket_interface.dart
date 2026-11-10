@@ -15,4 +15,7 @@ abstract class SIPUASocketInterface {
   bool send(dynamic message);
   bool isConnected();
   bool isConnecting();
+
+  /// CMR-1269: when this socket last received anything, keepalives included.
+  DateTime? get lastReceivedAt => null;
 }

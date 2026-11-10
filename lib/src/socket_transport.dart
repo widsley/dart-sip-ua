@@ -157,6 +157,9 @@ class SocketTransport {
     return socket.send(message);
   }
 
+  /// CMR-1269: when the current socket last received anything.
+  DateTime? get lastReceivedAt => socket.lastReceivedAt;
+
   bool isConnected() {
     return status == TransportStatus.connected;
   }
