@@ -48,6 +48,11 @@ class SIPUAWebSocket extends SIPUASocketInterface {
   int? status;
   late WebSocketSettings _webSocketSettings;
 
+  DateTime? _lastReceivedAt;
+
+  @override
+  DateTime? get lastReceivedAt => _lastReceivedAt;
+
   @override
   String get via_transport => _via_transport;
 
@@ -160,6 +165,7 @@ class SIPUAWebSocket extends SIPUASocketInterface {
    * WebSocket Event Handlers
    */
   void _onOpen() {
+    _lastReceivedAt = DateTime.now();
     logger.d('WebSocket $_url connected');
     onconnect!();
   }
@@ -173,6 +179,7 @@ class SIPUAWebSocket extends SIPUASocketInterface {
   }
 
   void _onMessage(dynamic data) {
+    _lastReceivedAt = DateTime.now();
     logger.d('Received WebSocket message');
     if (data != null) {
       if (data.toString().trim().isNotEmpty) {

@@ -10,10 +10,10 @@ import 'enums.dart';
 import 'event_manager/event_manager.dart';
 import 'event_manager/internal_events.dart';
 import 'exceptions.dart' as Exceptions;
-import 'grammar.dart';
 import 'logger.dart';
 import 'message.dart';
 import 'options.dart';
+import 'own_binding.dart';
 import 'parser.dart' as Parser;
 import 'registrator.dart';
 import 'rtc_session.dart';
@@ -129,6 +129,10 @@ class UA extends EventManager {
   Settings get configuration => _configuration;
 
   SocketTransport? get socketTransport => _socketTransport;
+
+  /// CMR-1269: when the SIP connection last received anything (keepalives
+  /// included); null before the first connection.
+  DateTime? get lastReceivedAt => _socketTransport?.lastReceivedAt;
 
   TransactionBag get transactions => _transactions;
 
@@ -615,22 +619,9 @@ class UA extends EventManager {
           'own=${_contact?.uri} count=${contacts.length} '
           'raw=${contacts.map((dynamic e) => e['raw']).toList()}');
       if (ownUser != null && ownUser.isNotEmpty) {
-        for (final dynamic entry in contacts) {
-          final String? raw = entry['raw'] as String?;
-          if (raw == null) {
-            continue;
-          }
-          // 部分一致ではなく user 部の完全一致で判定する（token が別の
-          // バインディングのパラメータ内に現れた場合の誤判定を避ける）。
-          final dynamic parsed = Grammar.parse(raw, 'Contact');
-          final dynamic uri = parsed is List && parsed.isNotEmpty
-              ? parsed[0]['parsed']?.uri
-              : null;
-          if (uri?.user == ownUser) {
-            contact = raw;
-            break;
-          }
-        }
+        // 部分一致ではなく user 部の完全一致。同じ UA の古い（切れた接続の）
+        // バインディングが残っている場合は有効期限の長い方を選ぶ（CMR-1269）。
+        contact = pickOwnBinding(contacts, ownUser);
       }
       if (contact == null) {
         // user 部で特定できなかった場合は従来どおり先頭を使うが、別セッションの
