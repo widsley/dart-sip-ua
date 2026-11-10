@@ -89,27 +89,31 @@ void main() {
           1);
     });
 
-    test('the waiting path arms one fallback timer that calls ready()', () {
-      expect(
-          RegExp(r'fallback\s*=\s*setTimeout\(\s*\(\)\s*=>\s*ready\(\)\s*,\s*'
-                  r'iceGatheringFallback\.inMilliseconds\s*\)')
-              .allMatches(source)
-              .length,
-          1);
+    // The settle-once and fallback behaviour itself is covered by
+    // com130_fallback_settler_test.dart; these only check the wiring.
+    test('the waiting path arms the fallback once', () {
+      expect(RegExp(r'settler\.armFallback\(\)').allMatches(source).length, 1);
     });
 
-    test('the fallback timer is armed only after the right-away check', () {
+    test('the fallback is armed only after the right-away check', () {
       final int check = source.indexOf('canUseLocalDescriptionImmediately(');
-      final int arm = source.indexOf('iceGatheringFallback.inMilliseconds');
+      final int arm = source.indexOf('settler.armFallback()');
       expect(check, isNonNegative);
       expect(arm, greaterThan(check));
     });
 
-    test('ready() cancels the fallback timer and skips a failed description',
-        () {
+    test('a failed description or a terminated session is not settled', () {
       expect(
-          RegExp(r'Future<void>\s+ready\(\)\s+async\s*\{[^}]*'
-                  r'clearTimeout\(\s*fallback\s*\)[^}]*!completer\.isCompleted')
+          RegExp(r'canSettle:\s*\(\)\s*=>\s*!completer\.isCompleted\s*&&\s*'
+                  r'_state\s*!=\s*RtcSessionState\.terminated')
+              .hasMatch(source),
+          isTrue);
+    });
+
+    test('a description settled by the fallback is logged as a warning', () {
+      expect(
+          RegExp(r'onFallback:\s*\(\)\s*=>\s*logger\s*\.w\([^;]*'
+                  r'candidates=\$hasCandidate')
               .hasMatch(source),
           isTrue);
     });
