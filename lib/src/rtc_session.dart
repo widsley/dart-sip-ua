@@ -2073,21 +2073,20 @@ class RTCSession extends EventManager implements Owner {
       }
     }
 
-    // Add 'pc.onicencandidate' event handler to resolve on last candidate.
-    bool finished = false;
-    Timer? fallback;
-
     for (Future<RTCSessionDescription> Function(RTCSessionDescription) modifier
         in modifiers) {
       desc = await modifier(desc);
     }
 
-    Future<void> ready() async {
-      clearTimeout(fallback);
-      if (!finished &&
-          !completer.isCompleted &&
-          _state != RtcSessionState.terminated) {
-        finished = true;
+    // Add 'pc.onicencandidate' event handler to resolve on last candidate.
+    bool hasCandidate = false;
+    final LocalDescriptionSettler settler = LocalDescriptionSettler(
+      canSettle: () =>
+          !completer.isCompleted && _state != RtcSessionState.terminated,
+      onFallback: () => logger
+          .w('createLocalDescription() | ICE gathering fallback fired after '
+              '${iceGatheringFallback.inSeconds} s, candidates=$hasCandidate'),
+      settle: () async {
         _connection!.onIceCandidate = null;
         _connection!.onIceGatheringState = null;
         _iceGatheringState = RTCIceGatheringState.RTCIceGatheringStateComplete;
@@ -2097,20 +2096,19 @@ class RTCSession extends EventManager implements Owner {
         emit(
             EventSdp(originator: Originator.local, type: type, sdp: desc!.sdp));
         completer.complete(desc);
-      }
-    }
+      },
+    );
 
     _connection!.onIceGatheringState = (RTCIceGatheringState state) {
       _iceGatheringState = state;
       if (state == RTCIceGatheringState.RTCIceGatheringStateComplete) {
-        ready();
+        settler.ready();
       }
     };
 
-    bool hasCandidate = false;
     _connection!.onIceCandidate = (RTCIceCandidate candidate) {
       if (candidate != null) {
-        emit(EventIceCandidate(candidate, ready));
+        emit(EventIceCandidate(candidate, settler.ready));
         if (!hasCandidate) {
           hasCandidate = true;
           /**
@@ -2120,7 +2118,8 @@ class RTCSession extends EventManager implements Owner {
            * initiating a call to answer the call waiting will be unacceptable.
            */
           if (ua.configuration.ice_gathering_timeout != 0) {
-            setTimeout(() => ready(), ua.configuration.ice_gathering_timeout);
+            setTimeout(
+                () => settler.ready(), ua.configuration.ice_gathering_timeout);
           }
         }
       }
@@ -2151,7 +2150,7 @@ class RTCSession extends EventManager implements Owner {
 
     // COM-130: backstop for a gathering that never completes (see the constant).
     if (!completer.isCompleted) {
-      fallback = setTimeout(() => ready(), iceGatheringFallback.inMilliseconds);
+      settler.armFallback();
     }
 
     return completer.future;
