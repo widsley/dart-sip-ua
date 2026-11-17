@@ -227,6 +227,22 @@ void main() {
       expect(h.sends, isEmpty);
     });
 
+    test('ICE recovering while waiting for the transport stops the wait', () {
+      final Harness h = Harness();
+      h.transportConnected = false;
+      h.controller.onIceState(IceConnState.disconnected);
+      h.elapse(5000);
+      expect(h.sends, isEmpty, reason: 'still waiting for the transport');
+      h.controller.onIceState(IceConnState.connected);
+      final int asks = h.reconnects.length;
+      h.elapse(20000);
+      expect(h.ends, isEmpty, reason: 'a recovered call must not end at 15 s');
+      expect(h.reconnects.length, asks, reason: 'no more reconnect requests');
+      h.transportConnected = true;
+      h.elapse(1000);
+      expect(h.sends, isEmpty, reason: 'no ICE restart once ICE is back');
+    });
+
     test('stops waiting quietly when the session ends', () {
       final Harness h = Harness();
       h.transportConnected = false;
