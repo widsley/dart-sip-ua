@@ -114,6 +114,16 @@ void main() {
       }
     });
 
+    test('x13: only the fast controller asks the transport to reconnect', () {
+      final String source =
+          _squash(File('lib/src/rtc_session.dart').readAsStringSync());
+      expect('reconnectTransportNow'.allMatches(source).length, 1);
+      expect(
+          _at(_body('IceRecoveryController? _createIceRecovery()'),
+              'requestTransportReconnect: _ua.reconnectTransportNow,'),
+          isNonNegative);
+    });
+
     test('closing the session disposes the controller', () {
       final String source =
           _squash(File('lib/src/rtc_session.dart').readAsStringSync());

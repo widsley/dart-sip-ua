@@ -79,6 +79,10 @@ class Harness {
         return sendStarts;
       },
       endCall: (IceRecoveryEnd reason) => ends.add(reason),
+      requestTransportReconnect: () {
+        reconnects.add(timers.now);
+        return reconnectStarts;
+      },
       log: logs.add,
       startTimer: timers.timer,
       startPeriodicTimer: timers.periodic,
@@ -91,8 +95,10 @@ class Harness {
   bool audioInterrupted = false;
   bool transportConnected = true;
   bool sendStarts = true;
+  bool reconnectStarts = true;
   final List<Duration> sends = <Duration>[];
   final List<IceRecoveryEnd> ends = <IceRecoveryEnd>[];
+  final List<Duration> reconnects = <Duration>[];
   final List<String> logs = <String>[];
 
   void elapse(int ms) => timers.elapse(Duration(milliseconds: ms));
@@ -231,6 +237,77 @@ void main() {
       h.elapse(20000);
       expect(h.sends, isEmpty);
       expect(h.ends, isEmpty);
+    });
+  });
+
+  group('IceRecoveryController: SIP transport reconnect (x13)', () {
+    test('asks the transport to reconnect at once, then every 2 s', () {
+      final Harness h = Harness();
+      h.transportConnected = false;
+      h.controller.restartNow('test');
+      expect(h.reconnects, <Duration>[Duration.zero]);
+      h.elapse(15000);
+      expect(h.reconnects, <Duration>[
+        for (int s = 0; s <= 14; s += 2) Duration(seconds: s),
+      ]);
+      expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.transportNotBack]);
+    });
+
+    test('asks as soon as ICE is disconnected while the transport is down', () {
+      final Harness h = Harness();
+      h.transportConnected = false;
+      h.controller.onIceState(IceConnState.disconnected);
+      expect(h.reconnects, <Duration>[Duration.zero]);
+      h.elapse(3999);
+      expect(h.reconnects, <Duration>[Duration.zero]);
+    });
+
+    test('does not ask on disconnected while the transport is up', () {
+      final Harness h = Harness();
+      h.controller.onIceState(IceConnState.disconnected);
+      h.elapse(3999);
+      expect(h.reconnects, isEmpty);
+    });
+
+    test('logs a reconnect only when an attempt started', () {
+      final Harness h = Harness();
+      h.transportConnected = false;
+      h.reconnectStarts = false;
+      h.controller.restartNow('test');
+      expect(
+          h.logs.where((String l) => l.contains('reconnect started')), isEmpty);
+      h.reconnectStarts = true;
+      h.elapse(2000);
+      expect(h.logs.where((String l) => l.contains('reconnect started')),
+          hasLength(1));
+    });
+
+    test('does not ask when the transport is connected', () {
+      final Harness h = Harness();
+      h.controller.restartNow('test');
+      h.elapse(20000);
+      expect(h.reconnects, isEmpty);
+    });
+
+    test('stops asking once the transport is back', () {
+      final Harness h = Harness();
+      h.transportConnected = false;
+      h.controller.restartNow('test');
+      h.elapse(3000);
+      h.transportConnected = true;
+      h.elapse(10000);
+      expect(
+          h.reconnects, <Duration>[Duration.zero, const Duration(seconds: 2)]);
+      expect(h.sends.length, 1);
+    });
+
+    test('stops asking when the session ends', () {
+      final Harness h = Harness();
+      h.transportConnected = false;
+      h.controller.restartNow('test');
+      h.sessionOver = true;
+      h.elapse(20000);
+      expect(h.reconnects, <Duration>[Duration.zero]);
     });
   });
 

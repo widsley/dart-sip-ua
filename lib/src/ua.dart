@@ -236,6 +236,16 @@ class UA extends EventManager {
   /**
    * Connection state.
    */
+  /// CMR-1139 x13: asks the SIP transport to reconnect at once (used while a
+  /// call's ICE restart waits for it). Not after [stop]. Returns whether an
+  /// attempt started.
+  bool reconnectTransportNow() {
+    if (_status == UAStatus.userClosed) {
+      return false;
+    }
+    return _socketTransport?.reconnectNow() ?? false;
+  }
+
   bool isConnected() {
     return _socketTransport!.isConnected();
   }

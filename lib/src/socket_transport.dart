@@ -115,6 +115,24 @@ class SocketTransport {
     return;
   }
 
+  /// CMR-1139 x13: reconnects now instead of after the backoff, and stays
+  /// `connecting` until the handshake ends so no second socket is opened.
+  /// Not while connected/connecting or after [disconnect].
+  bool reconnectNow() {
+    if (_close_requested || isConnected() || isConnecting()) {
+      return false;
+    }
+    clearTimeout(_recovery_timer);
+    _getSocket();
+    connect();
+    clearTimeout(_recovery_timer);
+    _recovery_timer = null;
+    if (!_close_requested && !isConnected()) {
+      status = TransportStatus.connecting;
+    }
+    return true;
+  }
+
   void disconnect() {
     logger.d('Transport close()');
 

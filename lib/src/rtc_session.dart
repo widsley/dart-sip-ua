@@ -1956,6 +1956,7 @@ class RTCSession extends EventManager implements Owner {
       sendIceRestart: () => renegotiate(
           options: iceRestartRenegotiateOptions(_rtcOfferConstraints)),
       endCall: _endCallForIceRecovery,
+      requestTransportReconnect: _ua.reconnectTransportNow,
       log: _iceLog,
     );
   }
