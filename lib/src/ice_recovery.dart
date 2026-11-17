@@ -25,6 +25,9 @@ const Duration iceRecoveryLimit = Duration(seconds: 15);
 /// was pending) and ICE is still `disconnected`.
 const Duration iceRestartRetryDelay = Duration(seconds: 1);
 
+/// How often a waiting restart asks the SIP transport to reconnect (x13).
+const Duration iceTransportReconnectInterval = Duration(seconds: 2);
+
 /// How often the SIP transport is checked while a restart waits for it.
 const Duration iceTransportPollInterval = Duration(milliseconds: 250);
 
@@ -79,6 +82,7 @@ class IceRecoveryController {
     required bool Function() isTransportConnected,
     required bool Function() sendIceRestart,
     required void Function(IceRecoveryEnd reason) endCall,
+    required bool Function() requestTransportReconnect,
     void Function(String message) log = iceLog,
     Timer Function(Duration, void Function())? startTimer,
     Timer Function(Duration, void Function(Timer))? startPeriodicTimer,
@@ -87,6 +91,7 @@ class IceRecoveryController {
         _isTransportConnected = isTransportConnected,
         _sendIceRestart = sendIceRestart,
         _endCall = endCall,
+        _requestTransportReconnect = requestTransportReconnect,
         _log = log,
         _startTimer = startTimer ?? Timer.new,
         _startPeriodicTimer = startPeriodicTimer ?? Timer.periodic;
@@ -96,6 +101,7 @@ class IceRecoveryController {
   final bool Function() _isTransportConnected;
   final bool Function() _sendIceRestart;
   final void Function(IceRecoveryEnd reason) _endCall;
+  final bool Function() _requestTransportReconnect;
   final void Function(String message) _log;
   final Timer Function(Duration, void Function()) _startTimer;
   final Timer Function(Duration, void Function(Timer)) _startPeriodicTimer;
@@ -164,6 +170,9 @@ class IceRecoveryController {
       return;
     }
     _log('disconnected, ICE restart in ${fastIceRestartDelay.inSeconds} s');
+    if (!_isTransportConnected()) {
+      _askTransportToReconnect();
+    }
     _armRestart(fastIceRestartDelay);
   }
 
@@ -214,10 +223,16 @@ class IceRecoveryController {
 
   void _waitForTransport(String reason) {
     Duration waited = Duration.zero;
+    Duration lastAsk = Duration.zero;
+    _askTransportToReconnect();
     _transportWait = _startPeriodicTimer(iceTransportPollInterval, (Timer t) {
       waited += iceTransportPollInterval;
       final bool connected = _isTransportConnected();
       if (!_isSessionOver() && !connected && waited < iceTransportWaitLimit) {
+        if (waited - lastAsk >= iceTransportReconnectInterval) {
+          lastAsk = waited;
+          _askTransportToReconnect();
+        }
         return;
       }
       t.cancel();
@@ -234,6 +249,12 @@ class IceRecoveryController {
           '${iceTransportWaitLimit.inSeconds} s, ending the call');
       _endCall(IceRecoveryEnd.transportNotBack);
     });
+  }
+
+  void _askTransportToReconnect() {
+    if (_requestTransportReconnect()) {
+      _log('SIP transport reconnect started');
+    }
   }
 
   void _onRecoveryDeadline() {
