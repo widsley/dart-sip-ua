@@ -67,6 +67,9 @@ class Settings {
   /// Call statistics in the log
   bool log_call_statistics = false;
 
+  /// CMR-1139 x9: how a call recovers its media after a network drop.
+  IceRecoveryPolicy ice_recovery_policy = IceRecoveryPolicy.standard;
+
   bool terminateOnAudioMediaPortZero = false;
 
   /// Sip Message Delay (in millisecond) ( default 0 ).
@@ -261,6 +264,9 @@ class Checks {
     },
     'log_call_statistics': (Settings src, Settings? dst) {
       dst!.log_call_statistics = src.log_call_statistics;
+    },
+    'ice_recovery_policy': (Settings src, Settings? dst) {
+      dst!.ice_recovery_policy = src.ice_recovery_policy;
     }
   };
 }

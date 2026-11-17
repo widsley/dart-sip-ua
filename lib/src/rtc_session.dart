@@ -12,6 +12,8 @@ import 'dialog.dart';
 import 'event_manager/event_manager.dart';
 import 'event_manager/internal_events.dart';
 import 'exceptions.dart' as Exceptions;
+import 'ice_recovery.dart';
+import 'ice_recovery_states.dart';
 import 'local_description_ready.dart';
 import 'logger.dart';
 import 'name_addr_header.dart';
@@ -173,6 +175,10 @@ class RTCSession extends EventManager implements Owner {
 
   Timer? _iceDisconnectTimer;
   bool _isAttemptingIceRestart = false;
+
+  /// CMR-1139 x9: set only under IceRecoveryPolicy.fast; null keeps the
+  /// standard ICE handling unchanged.
+  IceRecoveryController? _iceRecovery;
 
   // COM-130: true while the app's audio is seized by the OS (e.g. a native
   // cellular call). An ICE Failed during this window is treated as transient
@@ -1772,6 +1778,8 @@ class RTCSession extends EventManager implements Owner {
     clearTimeout(_timers.userNoAnswerTimer);
 
     _iceDisconnectTimer?.cancel();
+    _iceRecovery?.dispose();
+    _iceRecovery = null;
 
     // Clear Session Timers.
     clearTimeout(_sessionTimers.timer);
@@ -1855,6 +1863,7 @@ class RTCSession extends EventManager implements Owner {
     offerConstraints['mandatory']['IceRestart'] = true;
     final bool started = renegotiate(options: offerConstraints);
     logger.i('COM-130: ICE restart renegotiate started=$started');
+    _iceLog('ICE restart sent=$started (standard)');
     if (!started) {
       // The re-offer could not be sent yet (pending transaction / not
       // established). Reset the flag so a later recovery attempt is not
@@ -1887,7 +1896,8 @@ class RTCSession extends EventManager implements Owner {
       iceFailedOrDisconnected:
           ice == RTCIceConnectionState.RTCIceConnectionStateFailed ||
               ice == RTCIceConnectionState.RTCIceConnectionStateDisconnected,
-      isAttemptingIceRestart: _isAttemptingIceRestart,
+      isAttemptingIceRestart:
+          _iceRecovery?.restarting ?? _isAttemptingIceRestart,
     );
     // If we auto-held for COM-130, release the hold (stops PBX MoH, restores
     // two-way audio). The un-hold + ICE restart are combined into a single
@@ -1901,6 +1911,10 @@ class RTCSession extends EventManager implements Owner {
       logger
           .i('COM-130: interruption ended - resume (unhold=${decision.unhold}, '
               'ice=$ice) via single ICE-restart re-INVITE.');
+      if (_iceRecovery != null) {
+        _iceRecovery!.restartNow('audio interruption ended');
+        return;
+      }
       _iceDisconnectTimer?.cancel();
       _iceDisconnectTimer = null;
       _isAttemptingIceRestart = true;
@@ -1908,9 +1922,49 @@ class RTCSession extends EventManager implements Owner {
     }
   }
 
+  /// CMR-1139 x9: one `[ICE]` log line tagged with the start of the SIP Call-ID,
+  /// so lines from two calls can be told apart.
+  void _iceLog(String message) {
+    final String id = _id ?? '';
+    iceLog('$message (call ${id.length > 8 ? id.substring(0, 8) : id})');
+  }
+
+  /// CMR-1139 x9: ends the call when fast ICE recovery gives up.
+  void _endCallForIceRecovery(IceRecoveryEnd reason) {
+    if (isEnded()) {
+      return;
+    }
+    final bool transport = reason == IceRecoveryEnd.transportNotBack;
+    terminate(<String, dynamic>{
+      'cause': transport
+          ? DartSIP_C.CausesType.CONNECTION_ERROR
+          : DartSIP_C.CausesType.RTP_TIMEOUT,
+      'status_code': transport ? 500 : 408,
+      'reason_phrase':
+          transport ? 'SIP Transport Not Back' : 'ICE Connection Failed'
+    });
+  }
+
+  IceRecoveryController? _createIceRecovery() {
+    if (_ua.configuration.ice_recovery_policy != IceRecoveryPolicy.fast) {
+      return null;
+    }
+    return IceRecoveryController(
+      isSessionOver: isEnded,
+      isAudioInterrupted: () => _audioInterrupted,
+      isTransportConnected: () => _ua.isConnected(),
+      sendIceRestart: () => renegotiate(
+          options: iceRestartRenegotiateOptions(_rtcOfferConstraints)),
+      endCall: _endCallForIceRecovery,
+      log: _iceLog,
+    );
+  }
+
   Future<void> _createRTCConnection(Map<String, dynamic> pcConfig,
       Map<String, dynamic> rtcConstraints) async {
     _connection = await createPeerConnection(pcConfig, rtcConstraints);
+    _iceRecovery?.dispose();
+    _iceRecovery = _createIceRecovery();
     _connection!.onIceConnectionState = (RTCIceConnectionState state) {
       if (_state == RtcSessionState.terminated ||
           _state == RtcSessionState.canceled) {
@@ -1919,6 +1973,14 @@ class RTCSession extends EventManager implements Owner {
         _iceDisconnectTimer?.cancel();
         return;
       }
+
+      final IceRecoveryController? recovery = _iceRecovery;
+      final IceConnState? recoveryState = iceConnStateFor(state);
+      if (recovery != null && recoveryState != null) {
+        recovery.onIceState(recoveryState);
+        return;
+      }
+      _iceLog(iceStateLogName(state));
 
       if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
         // COM-130: an ICE Failed during an audio interruption (e.g. native
@@ -1929,9 +1991,11 @@ class RTCSession extends EventManager implements Owner {
           logger
               .w('COM-130: ICE Failed during audio interruption - suppressing '
                   'teardown, will attempt ICE restart on resume.');
+          _iceLog('failed during an audio interruption, left to the resume');
           return;
         }
         logger.e('ICE Connection State Failed.');
+        _iceLog('failed, ending the call');
         _iceDisconnectTimer?.cancel();
         terminate(<String, dynamic>{
           'cause': DartSIP_C.CausesType.RTP_TIMEOUT,
@@ -1943,6 +2007,7 @@ class RTCSession extends EventManager implements Owner {
         logger.w('ICE Connection State Disconnected.');
         if (_iceDisconnectTimer == null && !_isAttemptingIceRestart) {
           logger.i('Starting ICE disconnect timer...');
+          _iceLog('disconnected, ICE restart in 20 s');
           _iceDisconnectTimer = Timer(const Duration(seconds: 20), () {
             logger.w('ICE disconnect timer fired!');
             if (_connection?.iceConnectionState ==
@@ -1955,6 +2020,7 @@ class RTCSession extends EventManager implements Owner {
               _iceRestart();
             } else {
               logger.i('ICE restart aborted (state changed during timer).');
+              _iceLog('ICE restart skipped, state changed');
             }
             _iceDisconnectTimer = null;
           });

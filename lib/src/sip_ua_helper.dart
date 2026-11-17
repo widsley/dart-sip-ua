@@ -240,6 +240,7 @@ class SIPUAHelper extends EventManager {
     _settings.terminateOnAudioMediaPortZero =
         uaSettings.terminateOnMediaPortZero;
     _settings.log_call_statistics = uaSettings.logCallStatistics;
+    _settings.ice_recovery_policy = uaSettings.iceRecoveryPolicy;
 
     try {
       _ua = UA(_settings);
@@ -972,6 +973,10 @@ class UaSettings {
 
   /// Min interval between recovery connection, default 2 sec
   int connectionRecoveryMinInterval = 2;
+
+  /// CMR-1139 x9: ICE recovery after a network drop. [IceRecoveryPolicy.standard]
+  /// keeps the long-standing behaviour.
+  IceRecoveryPolicy iceRecoveryPolicy = IceRecoveryPolicy.standard;
 
   /// Allows to write advanced call statistics in the log after the call ends
   bool logCallStatistics = false;
