@@ -10,6 +10,7 @@ import 'enums.dart';
 import 'event_manager/event_manager.dart';
 import 'event_manager/internal_events.dart';
 import 'exceptions.dart' as Exceptions;
+import 'ice_recovery.dart';
 import 'logger.dart';
 import 'message.dart';
 import 'options.dart';
@@ -109,6 +110,12 @@ class UA extends EventManager {
 
   final Map<String?, RTCSession> _sessions = <String?, RTCSession>{};
   SocketTransport? _socketTransport;
+
+  /// CMR-1139 x14: REGISTER timing after a reconnect; fast policy only.
+  late final RegisterAfterConnectLog? registerLog =
+      _configuration.ice_recovery_policy == IceRecoveryPolicy.fast
+          ? RegisterAfterConnectLog()
+          : null;
   Contact? _contact;
   UAStatus _status = UAStatus.init;
   UAError? _error;
@@ -1010,6 +1017,7 @@ class UA extends EventManager {
     if (_status == UAStatus.userClosed) {
       return;
     }
+    registerLog?.transportConnected();
     _status = UAStatus.ready;
     _error = null;
 

@@ -275,3 +275,51 @@ class IceRecoveryController {
     _restarting = false;
   }
 }
+
+/// CMR-1139 x14: `[ICE]` lines with the time from the SIP socket connecting
+/// to the first REGISTER after it (sent, then answered or failed). Only the
+/// first REGISTER after each connect is logged; refreshes are not.
+class RegisterAfterConnectLog {
+  RegisterAfterConnectLog(
+      {void Function(String message) log = iceLog, DateTime Function()? now})
+      : _log = log,
+        _now = now ?? DateTime.now;
+
+  final void Function(String message) _log;
+  final DateTime Function() _now;
+  DateTime? _connectedAt;
+
+  /// The SIP socket connected (again).
+  void transportConnected() {
+    _connectedAt = _now();
+  }
+
+  /// A REGISTER went out.
+  void registerSent() {
+    if (_connectedAt != null) {
+      _log(
+          'REGISTER sent ${_sinceConnect()} ms after the SIP socket connected');
+    }
+  }
+
+  /// An answer to the REGISTER; provisional (1xx) answers are ignored.
+  void registerAnswered(int status) {
+    if (status >= 200) {
+      _end('answered $status');
+    }
+  }
+
+  /// The REGISTER ended without an answer (timeout, transport error).
+  void registerFailed(String reason) => _end('failed ($reason)');
+
+  void _end(String what) {
+    if (_connectedAt == null) {
+      return;
+    }
+    _log(
+        'REGISTER $what, ${_sinceConnect()} ms after the SIP socket connected');
+    _connectedAt = null;
+  }
+
+  int _sinceConnect() => _now().difference(_connectedAt!).inMilliseconds;
+}

@@ -147,11 +147,13 @@ class Registrator {
 
     EventManager handlers = EventManager();
     handlers.on(EventOnRequestTimeout(), (EventOnRequestTimeout value) {
+      _ua.registerLog?.registerFailed('timeout');
       _registrationFailure(
           UnHandledResponse(408, DartSIP_C.CausesType.REQUEST_TIMEOUT),
           DartSIP_C.CausesType.REQUEST_TIMEOUT);
     });
     handlers.on(EventOnTransportError(), (EventOnTransportError value) {
+      _ua.registerLog?.registerFailed('transport error');
       _registrationFailure(
           UnHandledResponse(500, DartSIP_C.CausesType.CONNECTION_ERROR),
           DartSIP_C.CausesType.CONNECTION_ERROR);
@@ -173,6 +175,7 @@ class Registrator {
         }
 
         String status_code = event.response!.status_code.toString();
+        _ua.registerLog?.registerAnswered(int.tryParse(status_code) ?? 0);
 
         if (utils.test1XX(status_code)) {
           // Ignore provisional responses.
@@ -276,6 +279,7 @@ class Registrator {
     RequestSender request_sender = RequestSender(_ua, request, handlers);
 
     _registering = true;
+    _ua.registerLog?.registerSent();
     request_sender.send();
   }
 
