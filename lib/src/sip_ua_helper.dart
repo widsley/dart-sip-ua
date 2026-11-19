@@ -241,6 +241,7 @@ class SIPUAHelper extends EventManager {
         uaSettings.terminateOnMediaPortZero;
     _settings.log_call_statistics = uaSettings.logCallStatistics;
     _settings.ice_recovery_policy = uaSettings.iceRecoveryPolicy;
+    _settings.sip_keepalive = uaSettings.sipKeepalive;
 
     try {
       _ua = UA(_settings);
@@ -977,6 +978,10 @@ class UaSettings {
   /// CMR-1139 x9: ICE recovery after a network drop. [IceRecoveryPolicy.standard]
   /// keeps the long-standing behaviour.
   IceRecoveryPolicy iceRecoveryPolicy = IceRecoveryPolicy.standard;
+
+  /// CMR-1139 x16: WebSocket ping that finds a dead SIP connection after a
+  /// network change. Null (default) keeps today's behaviour: no ping.
+  SipKeepalive? sipKeepalive;
 
   /// Allows to write advanced call statistics in the log after the call ends
   bool logCallStatistics = false;

@@ -65,6 +65,16 @@ Map<String, dynamic> iceRestartRenegotiateOptions(Map<String, dynamic>? base) =>
       'mediaConstraints': <String, dynamic>{'audio': true, 'video': false},
     };
 
+/// CMR-1139 x18: the 2xx answer to an ICE-restart re-INVITE, for the log.
+String iceRestartAnswerLine(Object? statusCode) =>
+    'ICE restart answered $statusCode';
+
+/// CMR-1139 x18: a failed ICE-restart re-INVITE, for the log. Without a status
+/// the 2xx came without an SDP answer that could be applied.
+String iceRestartFailureLine(Object? statusCode) => statusCode == null
+    ? 'ICE restart failed (2xx without a usable SDP answer)'
+    : 'ICE restart failed $statusCode';
+
 /// Writes one ICE line to the device log in every build mode. State names and
 /// decisions only; no candidates or addresses.
 void iceLog(String message) {
@@ -83,6 +93,7 @@ class IceRecoveryController {
     required bool Function() sendIceRestart,
     required void Function(IceRecoveryEnd reason) endCall,
     required bool Function() requestTransportReconnect,
+    required bool Function() probeTransport,
     void Function(String message) log = iceLog,
     Timer Function(Duration, void Function())? startTimer,
     Timer Function(Duration, void Function(Timer))? startPeriodicTimer,
@@ -92,6 +103,7 @@ class IceRecoveryController {
         _sendIceRestart = sendIceRestart,
         _endCall = endCall,
         _requestTransportReconnect = requestTransportReconnect,
+        _probeTransport = probeTransport,
         _log = log,
         _startTimer = startTimer ?? Timer.new,
         _startPeriodicTimer = startPeriodicTimer ?? Timer.periodic;
@@ -102,6 +114,9 @@ class IceRecoveryController {
   final bool Function() _sendIceRestart;
   final void Function(IceRecoveryEnd reason) _endCall;
   final bool Function() _requestTransportReconnect;
+
+  /// x16: checks the SIP connection at once (fast pings); true if started.
+  final bool Function() _probeTransport;
   final void Function(String message) _log;
   final Timer Function(Duration, void Function()) _startTimer;
   final Timer Function(Duration, void Function(Timer)) _startPeriodicTimer;
@@ -170,6 +185,9 @@ class IceRecoveryController {
       return;
     }
     _log('disconnected, ICE restart in ${fastIceRestartDelay.inSeconds} s');
+    if (_probeTransport()) {
+      _log('SIP connection check started');
+    }
     if (!_isTransportConnected()) {
       _askTransportToReconnect();
     }

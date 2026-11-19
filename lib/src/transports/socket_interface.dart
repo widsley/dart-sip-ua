@@ -18,4 +18,8 @@ abstract class SIPUASocketInterface {
 
   /// CMR-1269: when this socket last received anything, keepalives included.
   DateTime? get lastReceivedAt => null;
+
+  /// CMR-1139 x16: WebSocket ping interval (null: no ping). Other sockets
+  /// ignore it.
+  void setPingInterval(Duration? interval) {}
 }

@@ -71,6 +71,7 @@ class SocketTransport {
   int _recover_attempts = 0;
   Timer? _recovery_timer;
   bool _close_requested = false;
+  Duration? _pingInterval;
 
   late void Function(SIPUASocketInterface? socket, int? attempts) onconnecting;
   late void Function(SIPUASocketInterface? socket, ErrorCause cause)
@@ -110,6 +111,7 @@ class SocketTransport {
       socket.onconnect = _onConnect;
       socket.ondisconnect = _onDisconnect;
       socket.ondata = _onData;
+      socket.setPingInterval(_pingInterval);
       socket.connect();
     }
     return;
@@ -173,6 +175,13 @@ class SocketTransport {
     }
     String message = data.toString();
     return socket.send(message);
+  }
+
+  /// CMR-1139 x16: WebSocket ping interval for the current socket and the
+  /// sockets it connects later (null: no ping).
+  void setPingInterval(Duration? interval) {
+    _pingInterval = interval;
+    socket.setPingInterval(interval);
   }
 
   /// CMR-1269: when the current socket last received anything.

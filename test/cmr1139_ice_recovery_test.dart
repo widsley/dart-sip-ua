@@ -83,6 +83,7 @@ class Harness {
         reconnects.add(timers.now);
         return reconnectStarts;
       },
+      probeTransport: () => false,
       log: logs.add,
       startTimer: timers.timer,
       startPeriodicTimer: timers.periodic,

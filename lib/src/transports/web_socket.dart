@@ -49,9 +49,16 @@ class SIPUAWebSocket extends SIPUASocketInterface {
   late WebSocketSettings _webSocketSettings;
 
   DateTime? _lastReceivedAt;
+  Duration? _pingInterval;
 
   @override
   DateTime? get lastReceivedAt => _lastReceivedAt;
+
+  @override
+  void setPingInterval(Duration? interval) {
+    _pingInterval = interval;
+    _ws?.setPingInterval(interval);
+  }
 
   @override
   String get via_transport => _via_transport;
@@ -90,7 +97,8 @@ class SIPUAWebSocket extends SIPUASocketInterface {
     }
     logger.d('connecting to WebSocket $_url');
     try {
-      _ws = SIPUAWebSocketImpl(_url!, _messageDelay);
+      _ws = SIPUAWebSocketImpl(_url!, _messageDelay)
+        ..setPingInterval(_pingInterval);
 
       _ws!.onOpen = () {
         _closed = false;
