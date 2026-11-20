@@ -279,6 +279,11 @@ class IceRecoveryController {
 /// CMR-1139 x14: `[ICE]` lines with the time from the SIP socket connecting
 /// to the first REGISTER after it (sent, then answered or failed). Only the
 /// first REGISTER after each connect is logged; refreshes are not.
+/// x15: every time is counted from the connect, so `failed (timeout)` is not
+/// the transaction time. When the request sender answers a 401/407 challenge
+/// with credentials, the re-sent REGISTER has no `sent` line of its own and
+/// `answered` includes the challenge round trip(s); a challenge it cannot
+/// answer is logged as `answered 401` / `answered 407`.
 class RegisterAfterConnectLog {
   RegisterAfterConnectLog(
       {void Function(String message) log = iceLog, DateTime Function()? now})
@@ -302,14 +307,16 @@ class RegisterAfterConnectLog {
     }
   }
 
-  /// An answer to the REGISTER; provisional (1xx) answers are ignored.
+  /// An answer to the REGISTER; provisional (1xx) answers are ignored. Status
+  /// 0 (also what an unparsable status becomes) ends the line too (x15).
   void registerAnswered(int status) {
-    if (status >= 200) {
+    if (status == 0 || status >= 200) {
       _end('answered $status');
     }
   }
 
-  /// The REGISTER ended without an answer (timeout, transport error).
+  /// The REGISTER ended without an answer it could log: timeout (a 408 answer
+  /// arrives as a timeout too) or transport error.
   void registerFailed(String reason) => _end('failed ($reason)');
 
   void _end(String what) {

@@ -102,6 +102,27 @@ void main() {
         'REGISTER answered 403, 400 ms after the SIP socket connected');
   });
 
+  test('x15: an answer with status 0 (also an unparsable one) ends the line',
+      () {
+    log.transportConnected();
+    log.registerSent();
+    clock.advance(400);
+    log.registerAnswered(0);
+    expect(logs.last,
+        'REGISTER answered 0, 400 ms after the SIP socket connected');
+  });
+
+  test('x15: after an answer with status 0 the next refresh is not logged', () {
+    log.transportConnected();
+    log.registerSent();
+    log.registerAnswered(0);
+    logs.clear();
+    clock.advance(60000);
+    log.registerSent();
+    log.registerAnswered(200);
+    expect(logs, isEmpty);
+  });
+
   group('wiring (source checks; the UA needs a real transport)', () {
     String squash(String path) =>
         File(path).readAsStringSync().replaceAll(RegExp(r'\s+'), ' ');
@@ -136,6 +157,19 @@ void main() {
       }
       expect('_ua.registerLog?.'.allMatches(reg).length, 4,
           reason: 'only the REGISTER path, null-safe (null on standard)');
+    });
+
+    test(
+        'x15: a REGISTER re-sent after a 401/407 has no sent line of its own '
+        'and its answer passes the cseq filter', () {
+      final String reg = squash('lib/src/registrator.dart');
+      expect(
+          reg,
+          contains('handlers.on(EventOnAuthenticated(), '
+              '(EventOnAuthenticated value) { _cseq += 1; });'));
+      expect('registerSent()'.allMatches(reg).length, 1);
+      expect(squash('lib/src/request_sender.dart'),
+          isNot(contains('registerLog')));
     });
   });
 }
