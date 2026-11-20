@@ -74,6 +74,7 @@ class Harness {
       isSessionOver: () => sessionOver,
       isAudioInterrupted: () => audioInterrupted,
       isTransportConnected: () => transportConnected,
+      isTransportReady: () => transportConnected && transportRegistered,
       sendIceRestart: () {
         sends.add(timers.now);
         return sendStarts;
@@ -83,6 +84,7 @@ class Harness {
         reconnects.add(timers.now);
         return reconnectStarts;
       },
+      probeTransport: () => false,
       log: logs.add,
       startTimer: timers.timer,
       startPeriodicTimer: timers.periodic,
@@ -94,6 +96,7 @@ class Harness {
   bool sessionOver = false;
   bool audioInterrupted = false;
   bool transportConnected = true;
+  bool transportRegistered = true;
   bool sendStarts = true;
   bool reconnectStarts = true;
   final List<Duration> sends = <Duration>[];
@@ -254,6 +257,58 @@ void main() {
       h.elapse(20000);
       expect(h.sends, isEmpty);
       expect(h.ends, isEmpty);
+    });
+  });
+
+  group('IceRecoveryController: connected but not registered (x16 review)', () {
+    final int limitMs = iceTransportWaitLimit.inMilliseconds;
+
+    test('sends the restart at the limit instead of ending the call', () {
+      final Harness h = Harness();
+      h.transportRegistered = false;
+      h.controller.restartNow('test');
+      h.elapse(limitMs - 1);
+      expect(h.sends, isEmpty, reason: 'waits for the new REGISTER first');
+      expect(h.ends, isEmpty);
+      h.elapse(1);
+      expect(h.sends, hasLength(1),
+          reason: 'an in-dialog re-INVITE does not need the registration');
+      expect(h.ends, isEmpty);
+      expect(h.logs.last, contains('ICE restart sent'));
+      expect(
+          h.logs.where((String l) => l.contains('registration')), isNotEmpty);
+    });
+
+    test('sends at once when the registration comes back in time', () {
+      final Harness h = Harness();
+      h.transportRegistered = false;
+      h.controller.restartNow('test');
+      h.elapse(2000);
+      expect(h.sends, isEmpty);
+      h.transportRegistered = true;
+      h.elapse(250);
+      expect(h.sends, hasLength(1));
+      h.elapse(limitMs);
+      expect(h.sends, hasLength(1));
+    });
+
+    test('does not ask the connected transport to reconnect', () {
+      final Harness h = Harness();
+      h.transportRegistered = false;
+      h.controller.onIceState(IceConnState.disconnected);
+      h.elapse(fastIceRestartDelay.inMilliseconds + limitMs);
+      expect(h.reconnects, isEmpty);
+    });
+
+    test('ends the call only when the connection itself is not back', () {
+      final Harness h = Harness();
+      h.transportConnected = false;
+      h.transportRegistered = false;
+      h.controller.restartNow('test');
+      h.elapse(limitMs);
+      expect(h.sends, isEmpty);
+      expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.transportNotBack]);
+      expect(h.logs.last, contains('not connected'));
     });
   });
 
