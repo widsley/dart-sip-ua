@@ -214,6 +214,7 @@ class IceRecoveryController {
       if (_isAudioInterrupted()) {
         _log('still disconnected during an audio interruption, '
             'left to the resume');
+        _cancelDeadline();
         return;
       }
       restartNow('disconnected');
@@ -225,6 +226,7 @@ class IceRecoveryController {
     _disconnectTimer = null;
     if (_isAudioInterrupted()) {
       _log('failed during an audio interruption, left to the resume');
+      _cancelDeadline();
       return;
     }
     if (_restarting) {
@@ -303,6 +305,13 @@ class IceRecoveryController {
   /// shared by the wait for the transport and the wait for ICE.
   void _startDeadline() {
     _deadline ??= _startTimer(iceRecoveryDeadline, _onDeadline);
+  }
+
+  /// x19: a restart left to the resume of an audio interruption gets a new
+  /// deadline from the resume ([restartNow]), not the rest of this one.
+  void _cancelDeadline() {
+    _deadline?.cancel();
+    _deadline = null;
   }
 
   void _onDeadline() {

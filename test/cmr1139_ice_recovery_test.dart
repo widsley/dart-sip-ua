@@ -450,6 +450,57 @@ void main() {
       expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.iceNotRecovered]);
     });
 
+    test(
+        'a resume late in an interruption gets a full 40 s, not the rest of '
+        'the old deadline', () {
+      final Harness h = Harness();
+      h.controller.onIceState(IceConnState.disconnected);
+      h.audioInterrupted = true;
+      h.elapse(38000);
+      h.audioInterrupted = false;
+      h.controller.restartNow('resume');
+      expect(h.sends, hasLength(1));
+      h.elapse(2000);
+      expect(h.ends, isEmpty,
+          reason: 'the old deadline (40 s) must not end it');
+      h.elapse(37999);
+      expect(h.ends, isEmpty);
+      h.elapse(1);
+      expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.iceNotRecovered]);
+    });
+
+    test('an ICE failure during an interruption also leaves a full deadline',
+        () {
+      final Harness h = Harness();
+      h.audioInterrupted = true;
+      h.controller.onIceState(IceConnState.disconnected);
+      h.elapse(1000);
+      h.controller.onIceState(IceConnState.failed);
+      h.elapse(36000);
+      h.audioInterrupted = false;
+      h.controller.restartNow('resume');
+      h.elapse(39999);
+      expect(h.ends, isEmpty);
+      h.elapse(1);
+      expect(h.ends, hasLength(1));
+    });
+
+    test('the registration grace starts again when the connection drops', () {
+      final Harness h = Harness();
+      h.transportRegistered = false;
+      h.transportConnected = false;
+      h.controller.restartNow('test');
+      h.transportConnected = true;
+      h.elapse(2000);
+      h.transportConnected = false;
+      h.elapse(1000);
+      h.transportConnected = true;
+      h.elapse(iceRegistrationGrace.inMilliseconds - 1);
+      expect(h.sends, isEmpty, reason: 'the 2 s before the drop do not count');
+      h.elapse(1);
+      expect(h.sends, hasLength(1));
+    });
+
     test('a restart that cannot be sent on failed ends the call only once', () {
       final Harness h = Harness();
       h.sendStarts = false;
