@@ -191,13 +191,12 @@ void main() {
       expect(h.ends, isEmpty);
     });
 
-    test(
-        'x19: ends the call when ICE does not recover within 36 s of the restart',
+    test('x19: ends the call 40 s after ICE dropped when ICE does not recover',
         () {
       final Harness h = Harness();
       h.controller.onIceState(IceConnState.disconnected);
-      h.elapse(4000);
-      h.elapse(35999);
+      h.elapse(39999);
+      expect(h.sends, hasLength(1), reason: 'restart sent at 4 s');
       expect(h.ends, isEmpty);
       h.elapse(1);
       expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.iceNotRecovered]);
@@ -220,11 +219,13 @@ void main() {
       expect(h.ends, isEmpty);
     });
 
-    test('x19: ends the call when the transport is not back within 36 s', () {
+    test(
+        'x19: ends the call 40 s after the restart started without a transport',
+        () {
       final Harness h = Harness();
       h.transportConnected = false;
       h.controller.restartNow('test');
-      h.elapse(35999);
+      h.elapse(39999);
       expect(h.ends, isEmpty);
       h.elapse(1);
       expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.transportNotBack]);
@@ -239,8 +240,8 @@ void main() {
       expect(h.sends, isEmpty, reason: 'still waiting for the transport');
       h.controller.onIceState(IceConnState.connected);
       final int asks = h.reconnects.length;
-      h.elapse(40000);
-      expect(h.ends, isEmpty, reason: 'a recovered call must not end at 36 s');
+      h.elapse(45000);
+      expect(h.ends, isEmpty, reason: 'a recovered call must not end at 40 s');
       expect(h.reconnects.length, asks, reason: 'no more reconnect requests');
       h.transportConnected = true;
       h.elapse(1000);
@@ -261,13 +262,14 @@ void main() {
   });
 
   group('IceRecoveryController: connected but not registered (x16 review)', () {
-    final int limitMs = iceTransportWaitLimit.inMilliseconds;
+    final int graceMs = iceRegistrationGrace.inMilliseconds;
 
-    test('sends the restart at the limit instead of ending the call', () {
+    test('sends the restart after the registration grace instead of ending',
+        () {
       final Harness h = Harness();
       h.transportRegistered = false;
       h.controller.restartNow('test');
-      h.elapse(limitMs - 1);
+      h.elapse(graceMs - 1);
       expect(h.sends, isEmpty, reason: 'waits for the new REGISTER first');
       expect(h.ends, isEmpty);
       h.elapse(1);
@@ -288,7 +290,20 @@ void main() {
       h.transportRegistered = true;
       h.elapse(250);
       expect(h.sends, hasLength(1));
-      h.elapse(limitMs);
+      h.elapse(10000);
+      expect(h.sends, hasLength(1));
+    });
+
+    test('x19: the grace counts from when the connection came back', () {
+      final Harness h = Harness();
+      h.transportConnected = false;
+      h.transportRegistered = false;
+      h.controller.restartNow('test');
+      h.elapse(10000);
+      h.transportConnected = true;
+      h.elapse(graceMs - 1);
+      expect(h.sends, isEmpty);
+      h.elapse(1);
       expect(h.sends, hasLength(1));
     });
 
@@ -296,7 +311,7 @@ void main() {
       final Harness h = Harness();
       h.transportRegistered = false;
       h.controller.onIceState(IceConnState.disconnected);
-      h.elapse(fastIceRestartDelay.inMilliseconds + limitMs);
+      h.elapse(iceRecoveryDeadline.inMilliseconds);
       expect(h.reconnects, isEmpty);
     });
 
@@ -305,7 +320,7 @@ void main() {
       h.transportConnected = false;
       h.transportRegistered = false;
       h.controller.restartNow('test');
-      h.elapse(limitMs);
+      h.elapse(iceRecoveryDeadline.inMilliseconds);
       expect(h.sends, isEmpty);
       expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.transportNotBack]);
       expect(h.logs.last, contains('not connected'));
@@ -318,10 +333,11 @@ void main() {
       h.transportConnected = false;
       h.controller.restartNow('test');
       expect(h.reconnects, <Duration>[Duration.zero]);
-      h.elapse(36000);
+      h.elapse(39999);
       expect(h.reconnects, <Duration>[
-        for (int s = 0; s <= 34; s += 2) Duration(seconds: s),
+        for (int s = 0; s <= 38; s += 2) Duration(seconds: s),
       ]);
+      h.elapse(1);
       expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.transportNotBack]);
     });
 
@@ -400,6 +416,48 @@ void main() {
         expect(h.ends, hasLength(1));
       });
     }
+
+    test(
+        'the two waits share one deadline: a transport back at 35 s still '
+        'ends at 40 s (not 35 + 36 s)', () {
+      final Harness h = Harness();
+      h.transportConnected = false;
+      h.controller.onIceState(IceConnState.disconnected);
+      h.elapse(35000);
+      h.transportConnected = true;
+      h.elapse(250);
+      expect(h.sends, hasLength(1));
+      h.elapse(4749);
+      expect(h.ends, isEmpty);
+      h.elapse(1);
+      expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.iceNotRecovered]);
+      h.elapse(60000);
+      expect(h.ends, hasLength(1), reason: 'ended once');
+    });
+
+    test('the deadline during an audio interruption is left to the resume', () {
+      final Harness h = Harness();
+      h.controller.onIceState(IceConnState.disconnected);
+      h.audioInterrupted = true;
+      h.elapse(45000);
+      expect(h.ends, isEmpty);
+      h.audioInterrupted = false;
+      h.controller.restartNow('resume');
+      expect(h.sends, hasLength(1));
+      h.elapse(39999);
+      expect(h.ends, isEmpty, reason: 'a new deadline from the resume');
+      h.elapse(1);
+      expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.iceNotRecovered]);
+    });
+
+    test('a restart that cannot be sent on failed ends the call only once', () {
+      final Harness h = Harness();
+      h.sendStarts = false;
+      h.controller.onIceState(IceConnState.failed);
+      expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.iceFailed]);
+      h.elapse(60000);
+      expect(h.ends, hasLength(1));
+    });
   });
 
   group('IceRecoveryController: failed', () {
@@ -425,7 +483,7 @@ void main() {
       h.controller.onIceState(IceConnState.checking);
       h.controller.onIceState(IceConnState.failed);
       expect(h.ends, isEmpty, reason: 'restart still in progress');
-      h.elapse(36000);
+      h.elapse(40000);
       expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.iceNotRecovered]);
       expect(h.sends.length, 1);
     });
@@ -492,7 +550,7 @@ void main() {
       expect(h.ends, isEmpty);
     });
 
-    test('x19: dispose also cancels the 36 s waits', () {
+    test('x19: dispose also cancels the deadline', () {
       final Harness h = Harness();
       h.controller.onIceState(IceConnState.disconnected);
       h.elapse(4000);

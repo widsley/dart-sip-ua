@@ -15,14 +15,15 @@ enum IceRecoveryPolicy {
 /// Time in `disconnected` before the fast policy restarts ICE.
 const Duration fastIceRestartDelay = Duration(seconds: 4);
 
-/// How long a restart waits for the SIP transport before the call ends.
-/// x19: longer than the PBX's limit for a call without media (about 30 s),
-/// so the PBX decides and this only fires when the PBX cannot be reached.
-const Duration iceTransportWaitLimit = Duration(seconds: 36);
+/// x19: the app ends a call by itself only this long after ICE dropped (or a
+/// restart started) if ICE has not recovered. Longer than the PBX's limit for
+/// a call without media (about 30 s), so the PBX decides; the wait for the
+/// SIP transport and the wait for ICE after the restart share it.
+const Duration iceRecoveryDeadline = Duration(seconds: 40);
 
-/// How long ICE may take to reconnect after a restart was sent (x19: behind
-/// the PBX like [iceTransportWaitLimit]).
-const Duration iceRecoveryLimit = Duration(seconds: 36);
+/// x19: how long a connected transport waits for the new REGISTER before the
+/// restart is sent anyway (an in-dialog re-INVITE needs no registration).
+const Duration iceRegistrationGrace = Duration(seconds: 3);
 
 /// Retry delay when the restart re-INVITE could not start (another re-INVITE
 /// was pending) and ICE is still `disconnected`.
@@ -87,7 +88,7 @@ void iceLog(String message) {
 /// CMR-1139 x9: ICE recovery for [IceRecoveryPolicy.fast].
 ///
 /// RTCSession forwards ICE states and supplies the actions; this class owns
-/// the timers (restart delay, SIP transport wait, recovery limit).
+/// the timers (restart delay, SIP transport wait, one recovery deadline).
 class IceRecoveryController {
   IceRecoveryController({
     required bool Function() isSessionOver,
@@ -130,7 +131,7 @@ class IceRecoveryController {
   IceConnState? _last;
   Timer? _disconnectTimer;
   Timer? _transportWait;
-  Timer? _recoveryDeadline;
+  Timer? _deadline;
   bool _restarting = false;
   bool _disposed = false;
 
@@ -170,14 +171,14 @@ class IceRecoveryController {
     _disconnectTimer?.cancel();
     _disconnectTimer = null;
     _restarting = true;
+    _startDeadline();
     if (_isTransportReady()) {
       _send(reason);
     } else {
       final String what = _isTransportConnected()
           ? 'the SIP registration'
           : 'the SIP transport';
-      _log('ICE restart ($reason): waiting for $what, '
-          'up to ${iceTransportWaitLimit.inSeconds} s');
+      _log('ICE restart ($reason): waiting for $what');
       _waitForTransport(reason);
     }
   }
@@ -194,6 +195,7 @@ class IceRecoveryController {
       return;
     }
     _log('disconnected, ICE restart in ${fastIceRestartDelay.inSeconds} s');
+    _startDeadline();
     if (_probeTransport()) {
       _log('SIP connection check started');
     }
@@ -238,6 +240,7 @@ class IceRecoveryController {
       _restarting = false;
       _log('ICE restart ($reason) could not be sent');
       if (_last == IceConnState.failed) {
+        _resetEpisode();
         _endCall(IceRecoveryEnd.iceFailed);
       } else if (_last == IceConnState.disconnected) {
         _armRestart(iceRestartRetryDelay);
@@ -245,50 +248,48 @@ class IceRecoveryController {
       return;
     }
     _log('ICE restart sent ($reason)');
-    _recoveryDeadline = _startTimer(iceRecoveryLimit, _onRecoveryDeadline);
   }
 
   /// Waits until the transport is ready (connected and, if the UA registers,
-  /// registered). x16 review: at the limit a connected transport still gets
-  /// the restart, because the in-dialog re-INVITE does not need the
-  /// registration; only a transport that is not connected ends the call.
+  /// registered). x16 review: a connected transport gets the restart after
+  /// [iceRegistrationGrace] even without the new REGISTER, because the
+  /// in-dialog re-INVITE does not need it. x19: no limit of its own; the
+  /// episode deadline ([iceRecoveryDeadline]) ends the wait.
   void _waitForTransport(String reason) {
     Duration waited = Duration.zero;
     Duration lastAsk = Duration.zero;
+    Duration connectedFor = Duration.zero;
     if (!_isTransportConnected()) {
       _askTransportToReconnect();
     }
     _transportWait = _startPeriodicTimer(iceTransportPollInterval, (Timer t) {
       waited += iceTransportPollInterval;
-      final bool ready = _isTransportReady();
-      if (!_isSessionOver() && !ready && waited < iceTransportWaitLimit) {
-        if (!_isTransportConnected() &&
-            waited - lastAsk >= iceTransportReconnectInterval) {
-          lastAsk = waited;
-          _askTransportToReconnect();
-        }
-        return;
-      }
-      t.cancel();
       if (_isSessionOver()) {
+        t.cancel();
         return;
       }
-      if (ready) {
+      if (_isTransportReady()) {
+        t.cancel();
         _log('SIP transport back after ${waited.inMilliseconds} ms');
         _send(reason);
         return;
       }
       if (_isTransportConnected()) {
-        _log('SIP registration not back within '
-            '${iceTransportWaitLimit.inSeconds} s, sending the ICE restart '
-            'anyway');
-        _send(reason);
+        connectedFor += iceTransportPollInterval;
+        if (connectedFor >= iceRegistrationGrace) {
+          t.cancel();
+          _log('SIP registration not back within '
+              '${iceRegistrationGrace.inSeconds} s of connecting, sending the '
+              'ICE restart anyway');
+          _send(reason);
+        }
         return;
       }
-      _restarting = false;
-      _log('SIP transport not connected within '
-          '${iceTransportWaitLimit.inSeconds} s, ending the call');
-      _endCall(IceRecoveryEnd.transportNotBack);
+      connectedFor = Duration.zero;
+      if (waited - lastAsk >= iceTransportReconnectInterval) {
+        lastAsk = waited;
+        _askTransportToReconnect();
+      }
     });
   }
 
@@ -298,21 +299,42 @@ class IceRecoveryController {
     }
   }
 
-  void _onRecoveryDeadline() {
+  /// x19: one deadline per episode, from ICE dropping (or the first restart),
+  /// shared by the wait for the transport and the wait for ICE.
+  void _startDeadline() {
+    _deadline ??= _startTimer(iceRecoveryDeadline, _onDeadline);
+  }
+
+  void _onDeadline() {
+    _deadline = null;
     if (_isSessionOver()) {
       return;
     }
-    _restarting = false;
-    _log('not recovered within ${iceRecoveryLimit.inSeconds} s of the '
-        'restart, ending the call');
+    if (_isAudioInterrupted()) {
+      _log('not recovered within ${iceRecoveryDeadline.inSeconds} s during an '
+          'audio interruption, left to the resume');
+      _resetEpisode();
+      return;
+    }
+    final bool connected = _isTransportConnected();
+    _resetEpisode();
+    if (!connected) {
+      _log('SIP transport not connected within '
+          '${iceRecoveryDeadline.inSeconds} s of ICE dropping, ending the call');
+      _endCall(IceRecoveryEnd.transportNotBack);
+      return;
+    }
+    _log('not recovered within ${iceRecoveryDeadline.inSeconds} s of ICE '
+        'dropping, ending the call');
     _endCall(IceRecoveryEnd.iceNotRecovered);
   }
 
   void _resetEpisode() {
     _disconnectTimer?.cancel();
     _transportWait?.cancel();
-    _recoveryDeadline?.cancel();
+    _deadline?.cancel();
     _disconnectTimer = null;
+    _deadline = null;
     _restarting = false;
   }
 }
