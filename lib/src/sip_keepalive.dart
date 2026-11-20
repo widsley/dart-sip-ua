@@ -23,6 +23,18 @@ class SipKeepalive {
   /// [sipKeepaliveProbeWindow], so a dead connection is known before the
   /// ICE restart is sent.
   final Duration iceProbe;
+
+  /// x16 review: compared by value (the app compares UA settings to decide
+  /// whether the UA has to start again).
+  @override
+  bool operator ==(Object other) =>
+      other is SipKeepalive &&
+      other.idle == idle &&
+      other.inCall == inCall &&
+      other.iceProbe == iceProbe;
+
+  @override
+  int get hashCode => Object.hash(idle, inCall, iceProbe);
 }
 
 /// How long a probe ([SipKeepalive.iceProbe]) lasts.

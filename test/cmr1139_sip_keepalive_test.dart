@@ -91,6 +91,42 @@ Future<int?> _closeCodeWithin(SIPUAWebSocketImpl impl, Duration limit) async {
 }
 
 void main() {
+  group('SipKeepalive value equality (x16 review)', () {
+    // The app compares UA settings by value to decide whether to start the UA
+    // again; a keepalive built without const must not look like a change.
+    SipKeepalive build(int idle) => SipKeepalive(
+        idle: Duration(seconds: idle),
+        inCall: Duration(seconds: idle ~/ 10),
+        iceProbe: const Duration(seconds: 2));
+
+    test('equal values are equal, with the same hash', () {
+      final SipKeepalive a = build(30);
+      final SipKeepalive b = build(30);
+      expect(identical(a, b), isFalse);
+      expect(a == b, isTrue);
+      expect(a.hashCode, b.hashCode);
+    });
+
+    test('any different interval is not equal', () {
+      final SipKeepalive base = build(30);
+      expect(base == build(20), isFalse);
+      expect(
+          base ==
+              SipKeepalive(
+                  idle: base.idle,
+                  inCall: base.inCall,
+                  iceProbe: const Duration(seconds: 1)),
+          isFalse);
+      expect(
+          base ==
+              SipKeepalive(
+                  idle: base.idle,
+                  inCall: const Duration(seconds: 1),
+                  iceProbe: base.iceProbe),
+          isFalse);
+    });
+  });
+
   group('sipPingInterval', () {
     test('idle without calls, in-call with a call, probe while probing', () {
       expect(sipPingInterval(_keepalive, hasCalls: false, probing: false),
