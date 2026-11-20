@@ -92,8 +92,10 @@ void main() {
       for (final String part in <String>[
         'isSessionOver: isEnded,',
         'isAudioInterrupted: () => _audioInterrupted,',
-        // x16: the restart waits for the transport and the new REGISTER
-        'isTransportConnected: _ua.isTransportReady,',
+        // x16: the restart waits for the transport and the new REGISTER,
+        // but a connected transport still gets it at the limit (review)
+        'isTransportConnected: _ua.isConnected,',
+        'isTransportReady: _ua.isTransportReady,',
         'probeTransport: _ua.probeTransport,',
         // x18: the answer to the restart is logged
         'sendIceRestart: () => renegotiate( '

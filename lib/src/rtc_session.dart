@@ -1952,7 +1952,8 @@ class RTCSession extends EventManager implements Owner {
     return IceRecoveryController(
       isSessionOver: isEnded,
       isAudioInterrupted: () => _audioInterrupted,
-      isTransportConnected: _ua.isTransportReady,
+      isTransportConnected: _ua.isConnected,
+      isTransportReady: _ua.isTransportReady,
       probeTransport: _ua.probeTransport,
       sendIceRestart: () => renegotiate(
           options: iceRestartRenegotiateOptions(_rtcOfferConstraints)

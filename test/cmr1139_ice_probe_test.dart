@@ -14,6 +14,7 @@ class _Probe {
       isSessionOver: () => false,
       isAudioInterrupted: () => false,
       isTransportConnected: () => transportReady,
+      isTransportReady: () => transportReady,
       sendIceRestart: () {
         sends.add(timers.now);
         return true;
