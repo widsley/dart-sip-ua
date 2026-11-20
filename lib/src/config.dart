@@ -70,6 +70,9 @@ class Settings {
   /// CMR-1139 x9: how a call recovers its media after a network drop.
   IceRecoveryPolicy ice_recovery_policy = IceRecoveryPolicy.standard;
 
+  /// CMR-1139 x16: WebSocket ping that finds a dead SIP connection (null: off).
+  SipKeepalive? sip_keepalive;
+
   bool terminateOnAudioMediaPortZero = false;
 
   /// Sip Message Delay (in millisecond) ( default 0 ).
@@ -267,6 +270,9 @@ class Checks {
     },
     'ice_recovery_policy': (Settings src, Settings? dst) {
       dst!.ice_recovery_policy = src.ice_recovery_policy;
+    },
+    'sip_keepalive': (Settings src, Settings? dst) {
+      dst!.sip_keepalive = src.sip_keepalive;
     }
   };
 }

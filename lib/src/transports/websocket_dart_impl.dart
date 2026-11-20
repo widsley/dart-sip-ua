@@ -19,6 +19,15 @@ class SIPUAWebSocketImpl {
   OnMessageCallback? onMessage;
   OnCloseCallback? onClose;
   final int messageDelay;
+  Duration? _pingInterval;
+
+  /// CMR-1139 x16: pings the server every [interval]; no pong within one
+  /// interval closes the socket (dart:io). Applies now and on connect.
+  void setPingInterval(Duration? interval) {
+    _pingInterval = interval;
+    _socket?.pingInterval = interval;
+  }
+
   void connect(
       {Iterable<String>? protocols,
       required WebSocketSettings webSocketSettings}) async {
@@ -32,6 +41,7 @@ class SIPUAWebSocketImpl {
         _socket = await WebSocket.connect(_url,
             protocols: protocols, headers: webSocketSettings.extraHeaders);
       }
+      _socket!.pingInterval = _pingInterval;
 
       onOpen?.call();
       _socket!.listen((dynamic data) {

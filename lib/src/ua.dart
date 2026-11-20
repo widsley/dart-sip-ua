@@ -19,6 +19,7 @@ import 'parser.dart' as Parser;
 import 'registrator.dart';
 import 'rtc_session.dart';
 import 'sanity_check.dart';
+import 'sip_keepalive.dart';
 import 'sip_message.dart';
 import 'socket_transport.dart';
 import 'subscriber.dart';
@@ -116,6 +117,14 @@ class UA extends EventManager {
       _configuration.ice_recovery_policy == IceRecoveryPolicy.fast
           ? RegisterAfterConnectLog()
           : null;
+
+  /// CMR-1139 x16: WebSocket ping interval; only with `sip_keepalive`.
+  late final SipKeepaliveScheduler? _keepalive =
+      _configuration.sip_keepalive == null
+          ? null
+          : SipKeepaliveScheduler(_configuration.sip_keepalive!,
+              apply: (Duration? interval) =>
+                  _socketTransport?.setPingInterval(interval));
   Contact? _contact;
   UAStatus _status = UAStatus.init;
   UAError? _error;
@@ -186,6 +195,7 @@ class UA extends EventManager {
 
     // Set dynamic configuration.
     _dynConfiguration!.register = _configuration.register;
+    _keepalive?.update(hasCalls: _sessions.isNotEmpty);
   }
 
   /**
@@ -251,6 +261,25 @@ class UA extends EventManager {
       return false;
     }
     return _socketTransport?.reconnectNow() ?? false;
+  }
+
+  /// CMR-1139 x16: pings every second for a few seconds (a call's ICE went
+  /// `disconnected`), so a dead SIP connection is closed before the ICE
+  /// restart. False without `sip_keepalive` or after [stop].
+  bool probeTransport() {
+    final SipKeepaliveScheduler? keepalive = _keepalive;
+    if (keepalive == null || _status == UAStatus.userClosed) {
+      return false;
+    }
+    keepalive.probe();
+    return true;
+  }
+
+  /// CMR-1139 x16: the transport is connected and, when this UA registers,
+  /// registered again, so an in-dialog request reaches the PBX on it.
+  bool isTransportReady() {
+    return isConnected() &&
+        (_dynConfiguration?.register != true || _registrator.registered);
   }
 
   bool isConnected() {
@@ -361,6 +390,7 @@ class UA extends EventManager {
 
     // Close registrator.
     _registrator.close();
+    _keepalive?.stop();
 
     // If there are session wait a bit so CANCEL/BYE can be sent and their responses received.
     int num_sessions = _sessions.length;
@@ -589,6 +619,7 @@ class UA extends EventManager {
   void newRTCSession(
       {required RTCSession session, Originator? originator, dynamic request}) {
     _sessions[session.id] = session;
+    _keepalive?.update(hasCalls: true);
     emit(EventNewRTCSession(
         session: session, originator: originator, request: request));
   }
@@ -598,6 +629,7 @@ class UA extends EventManager {
    */
   void destroyRTCSession(RTCSession session) {
     _sessions.remove(session.id);
+    _keepalive?.update(hasCalls: _sessions.isNotEmpty);
   }
 
   /**

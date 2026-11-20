@@ -1952,13 +1952,29 @@ class RTCSession extends EventManager implements Owner {
     return IceRecoveryController(
       isSessionOver: isEnded,
       isAudioInterrupted: () => _audioInterrupted,
-      isTransportConnected: () => _ua.isConnected(),
+      isTransportConnected: _ua.isConnected,
+      isTransportReady: _ua.isTransportReady,
+      probeTransport: _ua.probeTransport,
       sendIceRestart: () => renegotiate(
-          options: iceRestartRenegotiateOptions(_rtcOfferConstraints)),
+          options: iceRestartRenegotiateOptions(_rtcOfferConstraints)
+            ..['eventHandlers'] = _iceRestartAnswerLog()),
       endCall: _endCallForIceRecovery,
       requestTransportReconnect: _ua.reconnectTransportNow,
       log: _iceLog,
     );
+  }
+
+  /// CMR-1139 x18: logs the answer to the fast ICE-restart re-INVITE (status
+  /// only). Timeouts and transport errors end the call without these events.
+  EventManager _iceRestartAnswerLog() {
+    final EventManager handlers = EventManager();
+    handlers.on(EventSucceeded(), (EventSucceeded event) {
+      _iceLog(iceRestartAnswerLine(event.response?.status_code));
+    });
+    handlers.on(EventCallFailed(), (EventCallFailed event) {
+      _iceLog(iceRestartFailureLine(event.response?.status_code));
+    });
+    return handlers;
   }
 
   Future<void> _createRTCConnection(Map<String, dynamic> pcConfig,
