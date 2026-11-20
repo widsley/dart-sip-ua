@@ -188,12 +188,13 @@ void main() {
       expect(h.ends, isEmpty);
     });
 
-    test('ends the call when ICE does not recover within 15 s of the restart',
+    test(
+        'x19: ends the call when ICE does not recover within 36 s of the restart',
         () {
       final Harness h = Harness();
       h.controller.onIceState(IceConnState.disconnected);
       h.elapse(4000);
-      h.elapse(14999);
+      h.elapse(35999);
       expect(h.ends, isEmpty);
       h.elapse(1);
       expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.iceNotRecovered]);
@@ -216,11 +217,11 @@ void main() {
       expect(h.ends, isEmpty);
     });
 
-    test('ends the call when the transport is not back within 15 s', () {
+    test('x19: ends the call when the transport is not back within 36 s', () {
       final Harness h = Harness();
       h.transportConnected = false;
       h.controller.restartNow('test');
-      h.elapse(14999);
+      h.elapse(35999);
       expect(h.ends, isEmpty);
       h.elapse(1);
       expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.transportNotBack]);
@@ -235,8 +236,8 @@ void main() {
       expect(h.sends, isEmpty, reason: 'still waiting for the transport');
       h.controller.onIceState(IceConnState.connected);
       final int asks = h.reconnects.length;
-      h.elapse(20000);
-      expect(h.ends, isEmpty, reason: 'a recovered call must not end at 15 s');
+      h.elapse(40000);
+      expect(h.ends, isEmpty, reason: 'a recovered call must not end at 36 s');
       expect(h.reconnects.length, asks, reason: 'no more reconnect requests');
       h.transportConnected = true;
       h.elapse(1000);
@@ -262,9 +263,9 @@ void main() {
       h.transportConnected = false;
       h.controller.restartNow('test');
       expect(h.reconnects, <Duration>[Duration.zero]);
-      h.elapse(15000);
+      h.elapse(36000);
       expect(h.reconnects, <Duration>[
-        for (int s = 0; s <= 14; s += 2) Duration(seconds: s),
+        for (int s = 0; s <= 34; s += 2) Duration(seconds: s),
       ]);
       expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.transportNotBack]);
     });
@@ -327,6 +328,25 @@ void main() {
     });
   });
 
+  group('IceRecoveryController: stays behind the PBX (x19)', () {
+    // The PBX ends a call after about 30 s without media and is the side
+    // that decides; the app's own limit only matters when the PBX cannot be
+    // reached, so it must not fire before about 40 s from ICE dropping.
+    for (final bool transportUp in <bool>[true, false]) {
+      test(
+          'never ends the call before 40 s after ICE drops '
+          '(SIP transport ${transportUp ? 'up' : 'down'})', () {
+        final Harness h = Harness();
+        h.transportConnected = transportUp;
+        h.controller.onIceState(IceConnState.disconnected);
+        h.elapse(39999);
+        expect(h.ends, isEmpty);
+        h.elapse(1);
+        expect(h.ends, hasLength(1));
+      });
+    }
+  });
+
   group('IceRecoveryController: failed', () {
     test('restarts at once on failed', () {
       final Harness h = Harness();
@@ -350,7 +370,7 @@ void main() {
       h.controller.onIceState(IceConnState.checking);
       h.controller.onIceState(IceConnState.failed);
       expect(h.ends, isEmpty, reason: 'restart still in progress');
-      h.elapse(15000);
+      h.elapse(36000);
       expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.iceNotRecovered]);
       expect(h.sends.length, 1);
     });
@@ -415,6 +435,21 @@ void main() {
       h.elapse(60000);
       expect(h.sends, isEmpty);
       expect(h.ends, isEmpty);
+    });
+
+    test('x19: dispose also cancels the 36 s waits', () {
+      final Harness h = Harness();
+      h.controller.onIceState(IceConnState.disconnected);
+      h.elapse(4000);
+      expect(h.sends, hasLength(1), reason: 'recovery deadline running');
+      h.controller.dispose();
+      final Harness w = Harness()..transportConnected = false;
+      w.controller.restartNow('test');
+      w.controller.dispose();
+      h.elapse(60000);
+      w.elapse(60000);
+      expect(h.ends, isEmpty);
+      expect(w.ends, isEmpty);
     });
 
     test('logs state names and decisions', () {

@@ -16,10 +16,13 @@ enum IceRecoveryPolicy {
 const Duration fastIceRestartDelay = Duration(seconds: 4);
 
 /// How long a restart waits for the SIP transport before the call ends.
-const Duration iceTransportWaitLimit = Duration(seconds: 15);
+/// x19: longer than the PBX's limit for a call without media (about 30 s),
+/// so the PBX decides and this only fires when the PBX cannot be reached.
+const Duration iceTransportWaitLimit = Duration(seconds: 36);
 
-/// How long ICE may take to reconnect after a restart was sent.
-const Duration iceRecoveryLimit = Duration(seconds: 15);
+/// How long ICE may take to reconnect after a restart was sent (x19: behind
+/// the PBX like [iceTransportWaitLimit]).
+const Duration iceRecoveryLimit = Duration(seconds: 36);
 
 /// Retry delay when the restart re-INVITE could not start (another re-INVITE
 /// was pending) and ICE is still `disconnected`.
