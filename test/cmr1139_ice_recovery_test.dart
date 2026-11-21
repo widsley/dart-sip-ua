@@ -191,11 +191,11 @@ void main() {
       expect(h.ends, isEmpty);
     });
 
-    test('x19: ends the call 40 s after ICE dropped when ICE does not recover',
+    test('x19: ends the call 20 s after ICE dropped when ICE does not recover',
         () {
       final Harness h = Harness();
       h.controller.onIceState(IceConnState.disconnected);
-      h.elapse(39999);
+      h.elapse(19999);
       expect(h.sends, hasLength(1), reason: 'restart sent at 4 s');
       expect(h.ends, isEmpty);
       h.elapse(1);
@@ -220,12 +220,12 @@ void main() {
     });
 
     test(
-        'x19: ends the call 40 s after the restart started without a transport',
+        'x19: ends the call 20 s after the restart started without a transport',
         () {
       final Harness h = Harness();
       h.transportConnected = false;
       h.controller.restartNow('test');
-      h.elapse(39999);
+      h.elapse(19999);
       expect(h.ends, isEmpty);
       h.elapse(1);
       expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.transportNotBack]);
@@ -241,7 +241,7 @@ void main() {
       h.controller.onIceState(IceConnState.connected);
       final int asks = h.reconnects.length;
       h.elapse(45000);
-      expect(h.ends, isEmpty, reason: 'a recovered call must not end at 40 s');
+      expect(h.ends, isEmpty, reason: 'a recovered call must not end at 20 s');
       expect(h.reconnects.length, asks, reason: 'no more reconnect requests');
       h.transportConnected = true;
       h.elapse(1000);
@@ -333,9 +333,9 @@ void main() {
       h.transportConnected = false;
       h.controller.restartNow('test');
       expect(h.reconnects, <Duration>[Duration.zero]);
-      h.elapse(39999);
+      h.elapse(19999);
       expect(h.reconnects, <Duration>[
-        for (int s = 0; s <= 38; s += 2) Duration(seconds: s),
+        for (int s = 0; s <= 18; s += 2) Duration(seconds: s),
       ]);
       h.elapse(1);
       expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.transportNotBack]);
@@ -399,18 +399,18 @@ void main() {
     });
   });
 
-  group('IceRecoveryController: stays behind the PBX (x19)', () {
-    // The PBX ends a call after about 30 s without media and is the side
-    // that decides; the app's own limit only matters when the PBX cannot be
-    // reached, so it must not fire before about 40 s from ICE dropping.
+  group('IceRecoveryController: ends before the PBX (x19)', () {
+    // The PBX ends a call about 30 s after media stops. ICE reports
+    // disconnected about 5-7 s after the drop (iPhone, 19 Nov), so 20 s from
+    // there ends the call about 3-5 s before the PBX.
     for (final bool transportUp in <bool>[true, false]) {
       test(
-          'never ends the call before 40 s after ICE drops '
+          'ends the call 20 s after ICE drops '
           '(SIP transport ${transportUp ? 'up' : 'down'})', () {
         final Harness h = Harness();
         h.transportConnected = transportUp;
         h.controller.onIceState(IceConnState.disconnected);
-        h.elapse(39999);
+        h.elapse(19999);
         expect(h.ends, isEmpty);
         h.elapse(1);
         expect(h.ends, hasLength(1));
@@ -418,12 +418,12 @@ void main() {
     }
 
     test(
-        'the two waits share one deadline: a transport back at 35 s still '
-        'ends at 40 s (not 35 + 36 s)', () {
+        'the two waits share one deadline: a transport back at 15 s still '
+        'ends at 20 s (not 15 + 20 s)', () {
       final Harness h = Harness();
       h.transportConnected = false;
       h.controller.onIceState(IceConnState.disconnected);
-      h.elapse(35000);
+      h.elapse(15000);
       h.transportConnected = true;
       h.elapse(250);
       expect(h.sends, hasLength(1));
@@ -444,26 +444,26 @@ void main() {
       h.audioInterrupted = false;
       h.controller.restartNow('resume');
       expect(h.sends, hasLength(1));
-      h.elapse(39999);
+      h.elapse(19999);
       expect(h.ends, isEmpty, reason: 'a new deadline from the resume');
       h.elapse(1);
       expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.iceNotRecovered]);
     });
 
     test(
-        'a resume late in an interruption gets a full 40 s, not the rest of '
+        'a resume late in an interruption gets a full 20 s, not the rest of '
         'the old deadline', () {
       final Harness h = Harness();
       h.controller.onIceState(IceConnState.disconnected);
       h.audioInterrupted = true;
-      h.elapse(38000);
+      h.elapse(18000);
       h.audioInterrupted = false;
       h.controller.restartNow('resume');
       expect(h.sends, hasLength(1));
       h.elapse(2000);
       expect(h.ends, isEmpty,
-          reason: 'the old deadline (40 s) must not end it');
-      h.elapse(37999);
+          reason: 'the old deadline (20 s) must not end it');
+      h.elapse(17999);
       expect(h.ends, isEmpty);
       h.elapse(1);
       expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.iceNotRecovered]);
@@ -479,7 +479,7 @@ void main() {
       h.elapse(36000);
       h.audioInterrupted = false;
       h.controller.restartNow('resume');
-      h.elapse(39999);
+      h.elapse(19999);
       expect(h.ends, isEmpty);
       h.elapse(1);
       expect(h.ends, hasLength(1));
@@ -534,7 +534,7 @@ void main() {
       h.controller.onIceState(IceConnState.checking);
       h.controller.onIceState(IceConnState.failed);
       expect(h.ends, isEmpty, reason: 'restart still in progress');
-      h.elapse(40000);
+      h.elapse(20000);
       expect(h.ends, <IceRecoveryEnd>[IceRecoveryEnd.iceNotRecovered]);
       expect(h.sends.length, 1);
     });

@@ -15,11 +15,12 @@ enum IceRecoveryPolicy {
 /// Time in `disconnected` before the fast policy restarts ICE.
 const Duration fastIceRestartDelay = Duration(seconds: 4);
 
-/// x19: the app ends a call by itself only this long after ICE dropped (or a
-/// restart started) if ICE has not recovered. Longer than the PBX's limit for
-/// a call without media (about 30 s), so the PBX decides; the wait for the
-/// SIP transport and the wait for ICE after the restart share it.
-const Duration iceRecoveryDeadline = Duration(seconds: 40);
+/// x19: the app ends a call by itself this long after ICE dropped (or a
+/// restart started) if ICE has not recovered. ICE drops a few seconds after
+/// the network does, so this ends the call a little before the PBX's limit
+/// for a call without media (about 30 s from the drop); the wait for the SIP
+/// transport and the wait for ICE after the restart share it.
+const Duration iceRecoveryDeadline = Duration(seconds: 20);
 
 /// x19: how long a connected transport waits for the new REGISTER before the
 /// restart is sent anyway (an in-dialog re-INVITE needs no registration).
