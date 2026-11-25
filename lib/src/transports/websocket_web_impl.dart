@@ -19,6 +19,9 @@ class SIPUAWebSocketImpl {
   OnCloseCallback? onClose;
   final int messageDelay;
 
+  /// CMR-1139 x16: browsers do not expose WebSocket pings; ignored.
+  void setPingInterval(Duration? interval) {}
+
   void connect(
       {Iterable<String>? protocols,
       required WebSocketSettings webSocketSettings}) async {

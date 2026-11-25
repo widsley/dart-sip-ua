@@ -1,6 +1,7 @@
 export 'src/com130.dart';
 export 'src/enums.dart';
 export 'src/ice_recovery.dart' show IceRecoveryPolicy;
+export 'src/sip_keepalive.dart' show SipKeepalive;
 export 'src/sip_message.dart';
 export 'src/sip_ua_helper.dart';
 export 'src/transport_type.dart';

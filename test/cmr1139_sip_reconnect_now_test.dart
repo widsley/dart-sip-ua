@@ -51,6 +51,8 @@ class FakeSocket implements SIPUASocketInterface {
   bool isConnecting() => false;
   @override
   DateTime? get lastReceivedAt => null;
+  @override
+  void setPingInterval(Duration? interval) {}
 }
 
 SocketTransport _transport(FakeSocket socket) {

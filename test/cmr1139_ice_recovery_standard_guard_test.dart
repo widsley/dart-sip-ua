@@ -92,13 +92,41 @@ void main() {
       for (final String part in <String>[
         'isSessionOver: isEnded,',
         'isAudioInterrupted: () => _audioInterrupted,',
-        'isTransportConnected: () => _ua.isConnected(),',
+        // x16: the restart waits for the transport and the new REGISTER,
+        // but a connected transport still gets it at the limit (review)
+        'isTransportConnected: _ua.isConnected,',
+        'isTransportReady: _ua.isTransportReady,',
+        'probeTransport: _ua.probeTransport,',
+        // x18: the answer to the restart is logged
         'sendIceRestart: () => renegotiate( '
-            'options: iceRestartRenegotiateOptions(_rtcOfferConstraints)),',
+            'options: iceRestartRenegotiateOptions(_rtcOfferConstraints) '
+            "..['eventHandlers'] = _iceRestartAnswerLog()),",
         'endCall: _endCallForIceRecovery,',
       ]) {
         expect(_at(body, part), isNonNegative, reason: part);
       }
+    });
+
+    test('x18: the restart answer and failure are logged with the status', () {
+      final String body = _body('EventManager _iceRestartAnswerLog()');
+      final int succeeded =
+          _at(body, 'handlers.on(EventSucceeded(), (EventSucceeded event) {');
+      final int failed =
+          _at(body, 'handlers.on(EventCallFailed(), (EventCallFailed event) {');
+      expect(succeeded, isNonNegative);
+      expect(failed, isNonNegative);
+      expect(
+          _at(
+              body,
+              '_iceLog(iceRestartAnswerLine(event.response?.status_code));',
+              succeeded),
+          greaterThan(succeeded));
+      expect(
+          _at(
+              body,
+              '_iceLog(iceRestartFailureLine(event.response?.status_code));',
+              failed),
+          greaterThan(failed));
     });
 
     test('the transport end is a connection error, the others an RTP timeout',

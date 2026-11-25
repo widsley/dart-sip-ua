@@ -65,6 +65,16 @@ Map<String, dynamic> iceRestartRenegotiateOptions(Map<String, dynamic>? base) =>
       'mediaConstraints': <String, dynamic>{'audio': true, 'video': false},
     };
 
+/// CMR-1139 x18: the 2xx answer to an ICE-restart re-INVITE, for the log.
+String iceRestartAnswerLine(Object? statusCode) =>
+    'ICE restart answered $statusCode';
+
+/// CMR-1139 x18: a failed ICE-restart re-INVITE, for the log. Without a status
+/// the 2xx came without an SDP answer that could be applied.
+String iceRestartFailureLine(Object? statusCode) => statusCode == null
+    ? 'ICE restart failed (2xx without a usable SDP answer)'
+    : 'ICE restart failed $statusCode';
+
 /// Writes one ICE line to the device log in every build mode. State names and
 /// decisions only; no candidates or addresses.
 void iceLog(String message) {
@@ -80,18 +90,22 @@ class IceRecoveryController {
     required bool Function() isSessionOver,
     required bool Function() isAudioInterrupted,
     required bool Function() isTransportConnected,
+    required bool Function() isTransportReady,
     required bool Function() sendIceRestart,
     required void Function(IceRecoveryEnd reason) endCall,
     required bool Function() requestTransportReconnect,
+    required bool Function() probeTransport,
     void Function(String message) log = iceLog,
     Timer Function(Duration, void Function())? startTimer,
     Timer Function(Duration, void Function(Timer))? startPeriodicTimer,
   })  : _isSessionOver = isSessionOver,
         _isAudioInterrupted = isAudioInterrupted,
         _isTransportConnected = isTransportConnected,
+        _isTransportReady = isTransportReady,
         _sendIceRestart = sendIceRestart,
         _endCall = endCall,
         _requestTransportReconnect = requestTransportReconnect,
+        _probeTransport = probeTransport,
         _log = log,
         _startTimer = startTimer ?? Timer.new,
         _startPeriodicTimer = startPeriodicTimer ?? Timer.periodic;
@@ -99,9 +113,13 @@ class IceRecoveryController {
   final bool Function() _isSessionOver;
   final bool Function() _isAudioInterrupted;
   final bool Function() _isTransportConnected;
+  final bool Function() _isTransportReady;
   final bool Function() _sendIceRestart;
   final void Function(IceRecoveryEnd reason) _endCall;
   final bool Function() _requestTransportReconnect;
+
+  /// x16: checks the SIP connection at once (fast pings); true if started.
+  final bool Function() _probeTransport;
   final void Function(String message) _log;
   final Timer Function(Duration, void Function()) _startTimer;
   final Timer Function(Duration, void Function(Timer)) _startPeriodicTimer;
@@ -149,10 +167,13 @@ class IceRecoveryController {
     _disconnectTimer?.cancel();
     _disconnectTimer = null;
     _restarting = true;
-    if (_isTransportConnected()) {
+    if (_isTransportReady()) {
       _send(reason);
     } else {
-      _log('ICE restart ($reason): waiting for the SIP transport, '
+      final String what = _isTransportConnected()
+          ? 'the SIP registration'
+          : 'the SIP transport';
+      _log('ICE restart ($reason): waiting for $what, '
           'up to ${iceTransportWaitLimit.inSeconds} s');
       _waitForTransport(reason);
     }
@@ -170,6 +191,9 @@ class IceRecoveryController {
       return;
     }
     _log('disconnected, ICE restart in ${fastIceRestartDelay.inSeconds} s');
+    if (_probeTransport()) {
+      _log('SIP connection check started');
+    }
     if (!_isTransportConnected()) {
       _askTransportToReconnect();
     }
@@ -221,15 +245,22 @@ class IceRecoveryController {
     _recoveryDeadline = _startTimer(iceRecoveryLimit, _onRecoveryDeadline);
   }
 
+  /// Waits until the transport is ready (connected and, if the UA registers,
+  /// registered). x16 review: at the limit a connected transport still gets
+  /// the restart, because the in-dialog re-INVITE does not need the
+  /// registration; only a transport that is not connected ends the call.
   void _waitForTransport(String reason) {
     Duration waited = Duration.zero;
     Duration lastAsk = Duration.zero;
-    _askTransportToReconnect();
+    if (!_isTransportConnected()) {
+      _askTransportToReconnect();
+    }
     _transportWait = _startPeriodicTimer(iceTransportPollInterval, (Timer t) {
       waited += iceTransportPollInterval;
-      final bool connected = _isTransportConnected();
-      if (!_isSessionOver() && !connected && waited < iceTransportWaitLimit) {
-        if (waited - lastAsk >= iceTransportReconnectInterval) {
+      final bool ready = _isTransportReady();
+      if (!_isSessionOver() && !ready && waited < iceTransportWaitLimit) {
+        if (!_isTransportConnected() &&
+            waited - lastAsk >= iceTransportReconnectInterval) {
           lastAsk = waited;
           _askTransportToReconnect();
         }
@@ -239,13 +270,20 @@ class IceRecoveryController {
       if (_isSessionOver()) {
         return;
       }
-      if (connected) {
+      if (ready) {
         _log('SIP transport back after ${waited.inMilliseconds} ms');
         _send(reason);
         return;
       }
+      if (_isTransportConnected()) {
+        _log('SIP registration not back within '
+            '${iceTransportWaitLimit.inSeconds} s, sending the ICE restart '
+            'anyway');
+        _send(reason);
+        return;
+      }
       _restarting = false;
-      _log('SIP transport not back within '
+      _log('SIP transport not connected within '
           '${iceTransportWaitLimit.inSeconds} s, ending the call');
       _endCall(IceRecoveryEnd.transportNotBack);
     });
