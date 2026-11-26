@@ -202,13 +202,9 @@ class SocketTransport {
   void _reconnect(bool error) {
     _recover_attempts = _recover_attempts + 1;
 
-    num k = ((Math.randomDouble() * pow(2, _recover_attempts)) + 1).floor();
-
-    if (k < _recovery_options['min_interval']!) {
-      k = _recovery_options['min_interval']!;
-    } else if (k > _recovery_options['max_interval']!) {
-      k = _recovery_options['max_interval']!;
-    }
+    final int k = recoveryDelaySeconds(_recover_attempts, Math.randomDouble(),
+        minSeconds: _recovery_options['min_interval']!,
+        maxSeconds: _recovery_options['max_interval']!);
 
     logger.d(
         'reconnection attempt: $_recover_attempts. next connection attempt in $k seconds');
@@ -220,7 +216,7 @@ class SocketTransport {
         // Connect the socket.
         connect();
       }
-    }, k * 1000 as int);
+    }, k * 1000);
   }
 
   /**
@@ -330,4 +326,15 @@ class SocketTransport {
 
     ondata(this, data);
   }
+}
+
+/// CMR-1139 x22: seconds until the next reconnect. The exponent is capped
+/// because 2^63 overflows a Dart int and the wait fell back to the minimum.
+int recoveryDelaySeconds(int attempts, double random,
+    {required int minSeconds, required int maxSeconds}) {
+  final int k = ((random * pow(2, min(attempts, 30))) + 1).floor();
+  if (k < minSeconds) {
+    return minSeconds;
+  }
+  return k > maxSeconds ? maxSeconds : k;
 }
